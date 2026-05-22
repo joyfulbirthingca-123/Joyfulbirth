@@ -33,7 +33,7 @@ const IcoOut  =p=><Ic {...p} d={["M9 21H5a2 2 0 01-2-2V5a2 2 0 012-2h4","M16 17l
 const IcoChL  =p=><Ic {...p} d="M15 18l-6-6 6-6"/>;
 const IcoChR  =p=><Ic {...p} d="M9 18l6-6-6-6"/>;
 const IcoClock=p=><Ic {...p} d={["M12 2a10 10 0 100 20A10 10 0 0012 2z","M12 6v6l4 2"]}/>;
-const IcoCal  =p=><Ic {...p} d={["M19 4H5a2 2 0 00-2 2v14a2 2 0 002 2h14a2 2 0 002-2V6a2 2 0 00-2-2z","M16 2v5.0 2v4M3 10h18"]}/>;
+const IcoCal  =p=><Ic {...p} d={["M19 4H5a2 2 0 00-2 2v14a2 2 0 002 2h14a2 2 0 002-2V6a2 2 0 00-2-2z","M16 2v5.1 2v4M3 10h18"]}/>;
 const IcoEdit =p=><Ic {...p} d="M17 3a2.828 2.828 0 114 4L7.5 20.5 2 22l1.5-5.5L17 3z"/>;
 const IcoTrsh =p=><Ic {...p} d={["M3 6h18","M19 6v14a2 2 0 01-2 2H7a2 2 0 01-2-2V6m3 0V4a2 2 0 012-2h4a2 2 0 012 2v2","M10 11v6","M14 11v6"]}/>;
 const IcoPlus =p=><Ic {...p} d="M12 5v14M5 12h14"/>;
@@ -50,14 +50,16 @@ const IcoFile =p=><Ic {...p} d={["M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 0
 const IcoSave =p=><Ic {...p} d={["M19 21H5a2 2 0 01-2-2V5a2 2 0 012-2h11l5 5v11a2 2 0 01-2 2z","M17 21v-8H7v8","M7 3v5h8"]}/>;
 const IcoWrn  =p=><Ic {...p} d={["M12 2a10 10 0 100 20A10 10 0 0012 2z","M12 8v4","M12 16h.01"]}/>;
 const IcoPump =p=><Ic {...p} d={["M9 3H5a2 2 0 00-2 2v14a2 2 0 002 2h14a2 2 0 002-2V8l-5-5z","M9 3v5h6","M8 13h8","M8 17h4"]}/>;
-const IcoBatt =p=><Ic {...p} d={["M23 7h-2a2 2 0 00-2-2H3a2 2 0 00-2 2v10a2 2 0 002 2h16a2 2 0 002-2h2","M7 10h4v5.0z"]}/>;
+const IcoBatt =p=><Ic {...p} d={["M23 7h-2a2 2 0 00-2-2H3a2 2 0 00-2 2v10a2 2 0 002 2h16a2 2 0 002-2h2","M7 10h4v5.1z"]}/>;
 const IcoPlug =p=><Ic {...p} d={["M9 3v2m6-2v2","M7 7h10l-1 8H8z","M9 15v3m6-3v3"]}/>;
 const IcoStar =p=><Ic {...p} d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z"/>;
 const IcoLink =p=><Ic {...p} d={["M10 13a5 5 0 007.54.54l3-3a5 5 0 00-7.07-7.07l-1.72 1.71","M14 11a5 5 0 00-7.54-.54l-3 3a5 5 0 007.07 7.07l1.71-1.71"]}/>;
 
 // -- DATE / TIME HELPERS -------------------------------------------
-const fmtEN=s=>{const[y,m,d]=s.split("-").map(Number);const D=["Sunday","Monday","Tuesday","Wednesday","Thursday","Friday","Saturday"],M=["January","February","March","April","May","June","July","August","September","October","November","December"];return D[new Date(y,m-1,d).getDay()]+", "+M[m-1]+" "+d+", "+y;};
-const fmtFR=s=>{const[y,m,d]=s.split("-").map(Number);const D=["Dimanche","Lundi","Mardi","Mercredi","Jeudi","Vendredi","Samedi"],M=["Janvier","Février","Mars","Avril","Mai","Juin","Juillet","Août","Septembre","Octobre","Novembre","Décembre"];return D[new Date(y,m-1,d).getDay()]+" "+d+" "+M[m-1]+" "+y;};
+const fmtEN=s=>{if(!s||typeof s!=="string"||!s.match(/^\d{4}-\d{2}-\d{2}$/))return s||"";const[y,m,d]=s.split("-").map(Number);const D=["Sunday","Monday","Tuesday","Wednesday","Thursday","Friday","Saturday"],M=["January","February","March","April","May","June","July","August","September","October","November","December"];return D[new Date(y,m-1,d).getDay()]+", "+M[m-1]+" "+d+", "+y;};
+const fmtFR=s=>{if(!s||typeof s!=="string"||!s.match(/^\d{4}-\d{2}-\d{2}$/))return s||"";const[y,m,d]=s.split("-").map(Number);const D=["Dimanche","Lundi","Mardi","Mercredi","Jeudi","Vendredi","Samedi"],M=["Janvier","Février","Mars","Avril","Mai","Juin","Juillet","Août","Septembre","Octobre","Novembre","Décembre"];return D[new Date(y,m-1,d).getDay()]+" "+d+" "+M[m-1]+" "+y;};
+// Normalise any date format to YYYY-MM-DD
+const normDate=s=>{if(!s)return "";if(typeof s==="string"&&s.match(/^\d{4}-\d{2}-\d{2}$/))return s;try{var d=new Date(s);if(!isNaN(d))return d.getFullYear()+"-"+String(d.getMonth()+1).padStart(2,"0")+"-"+String(d.getDate()).padStart(2,"0");}catch(e){}return String(s);};
 const fmtT=t=>{if(!t)return"";const[h,mn]=t.split(":").map(Number);return(h%12||12)+":"+(mn<10?"0":"")+mn+" "+(h>=12?"PM":"AM");};
 const todayStr=()=>{const d=new Date();return d.getFullYear()+"-"+(d.getMonth()<9?"0":"")+(d.getMonth()+1)+"-"+(d.getDate()<10?"0":"")+d.getDate();};
 const toMin=t=>{const[h,m]=t.split(":").map(Number);return h*60+m;};
@@ -100,7 +102,7 @@ const TR={
       else loc=" "+(s.officeAddress||"Our office");
       var id=b.serviceId||"";
       var nm=b.clientName||"";
-      var appt="\n\n "+b.serviceName+(b.packageLabel?" - "+b.packageLabel:"")+"\nDate: "+fmtEN(b.date)+"\nTime: "+fmtT(b.time)+"\n"+loc;
+      var appt="\n\n "+b.serviceName+(b.packageLabel?" - "+b.packageLabel:"")+"\nDate: "+fmtEN(normDate(b.date))+"\nTime: "+fmtT(b.time)+"\n"+loc;
       if(id==="s1") return "Hi "+nm+"  we're really glad you reached out for support.\n\nDuring your consultation, we'll look at feeding together without judgment or pressure. We'll discuss your concerns, observe a feeding, check baby's mouth, tongue, body tension, position and latch, weigh your baby, provide nipple sizing for proper insert fit, review pump use and pumping schedules, and create a realistic, supportive plan for you and your baby \n\nYou do not need to prepare anything perfectly before your session. Just come as you are \n\nIf you have:\n- Pump equipment\n- Bottles or nipple shields\n- Baby's medical notes or weight history\nyou can keep them nearby for the consultation \n\nOur goal is to help you feel more confident, informed, and supported throughout your feeding journey."+appt;
       if(id==="s2") return "Hi "+nm+"  we're so happy you're joining our childbirth education classes!\n\nOver the next weeks, we'll prepare together for labor, birth, postpartum, and newborn life step by step in a calm and supportive environment.\n\nYou'll also learn practical comfort techniques, movement, breathing, and exercises to help prepare your body for birth \n\nFor class:\n- Wear comfortable clothes\n- Bring water/snacks and anything you need to feel comfortable\n- Partners are encouraged to participate fully \n\nThe session is expected to last 90 minutes maximum.\n\nOur goal is for you to feel informed, supported, and more confident heading into birth and postpartum "+appt;
       if(id==="s3") return "Hi "+nm+"  we're so happy to support you during this postpartum season.\n\nThese early weeks can feel beautiful, emotional, exhausting, and overwhelming all at once. Our goal is to help lighten the load and support you practically and emotionally while you recover and adjust to life with your baby \n\nDuring visits, we can focus on:\n- Newborn care\n- Feeding support\n- Maternal recovery\n- Emotional support\n- Rest and reassurance\n\nYou do not need to have it all together before we arrive "+appt;
@@ -115,7 +117,7 @@ const TR={
       else if(b.deliveryChoice==="delivery") loc=" Delivery";
       else if(b.location==="home") loc=" Home visit";
       else loc=" "+(s.officeAddress||"Our office");
-      return "Hi "+b.clientName+"  just a reminder for your appointment tomorrow!\n\n "+b.serviceName+(b.packageLabel?" - "+b.packageLabel:"")+"\nDate: "+fmtEN(b.date)+"\nTime: "+fmtT(b.time)+"\n"+loc+"\n\nWe are excited to see you \nLet us know if you need anything before then!";
+      return "Hi "+b.clientName+"  just a reminder for your appointment tomorrow!\n\n "+b.serviceName+(b.packageLabel?" - "+b.packageLabel:"")+"\nDate: "+fmtEN(normDate(b.date))+"\nTime: "+fmtT(b.time)+"\n"+loc+"\n\nWe are excited to see you \nLet us know if you need anything before then!";
     },
     waFup:function(b,s){
       return "Hi "+b.clientName+"  we're so glad we got to support you.\n\nIf you feel comfortable, we'd love a short feedback or testimonial from you  it really helps other moms find support too.\n\nAlso, if you'd like, we can guide you on the next step (postpartum support / breastfeeding / etc.) \n\n- "+(s.consultantName||s.businessName);
@@ -156,7 +158,7 @@ const TR={
       else loc=" "+(s.officeAddress||"Notre cabinet");
       var id=b.serviceId||"";
       var nm=b.clientName||"";
-      var appt="\n\n "+(b.serviceNameFr||b.serviceName)+(b.packageLabelFr||b.packageLabel?" - "+(b.packageLabelFr||b.packageLabel):"")+"\nDate: "+fmtFR(b.date)+"\nTime: "+b.time+"\n"+loc;
+      var appt="\n\n "+(b.serviceNameFr||b.serviceName)+(b.packageLabelFr||b.packageLabel?" - "+(b.packageLabelFr||b.packageLabel):"")+"\nDate: "+fmtFR(normDate(b.date))+"\nTime: "+b.time+"\n"+loc;
       if(id==="s1") return "Salut "+nm+"  nous sommes vraiment ravis que vous ayez sollicit\xe9 notre aide.\n\nLors de votre consultation, nous aborderons l'allaitement ensemble, sans jugement ni pression. Nous discuterons de vos pr\xe9occupations, observerons une t\xe9t\xe9e, v\xe9rifierons la bouche, la langue, la tension corporelle, la position et la prise du sein de votre b\xe9b\xe9, le p\xe8serons, vous conseillerons sur la taille de t\xe9tine adapt\xe9e, passerons en revue l'utilisation du tire-lait et les horaires d'expression, et \xe9laborerons un plan r\xe9aliste et bienveillant pour vous et votre b\xe9b\xe9 \n\nVous n'avez pas besoin de tout pr\xe9parer \xe0 la perfection avant votre s\xe9ance. Venez simplement comme vous \xeates \n\nSi vous avez :\n- \xc9quipement de pompage\n- Biberons ou prot\xe8ge-t\xe9tines\n- Les notes m\xe9dicales ou l'historique de poids de votre b\xe9b\xe9\nils peuvent \xeatre conserv\xe9s \xe0 proximit\xe9 pour la consultation \n\nNotre objectif est de vous aider \xe0 vous sentir plus confiante, inform\xe9e et soutenue tout au long de votre parcours d'allaitement."+appt;
       if(id==="s2") return "Salut "+nm+"  nous sommes ravis que vous participiez \xe0 nos cours de pr\xe9paration \xe0 la naissance !\n\nAu cours des prochaines semaines, nous nous pr\xe9parerons ensemble, \xe9tape par \xe9tape, \xe0 l'accouchement, \xe0 la p\xe9riode post-partum et \xe0 la vie avec le nouveau-n\xe9, dans un environnement calme et bienveillant.\n\nVous apprendrez \xe9galement des techniques pratiques de confort, des mouvements, des exercices de respiration et des techniques pour pr\xe9parer votre corps \xe0 l'accouchement \n\nPour le cours :\n- Portez des v\xeatements confortables\n- Apportez de l'eau, des en-cas et tout ce dont vous avez besoin pour vous sentir \xe0 l'aise\n- Les partenaires sont encourag\xe9s \xe0 participer pleinement \n\nLa s\xe9ance devrait durer 90 minutes maximum.\n\nNotre objectif est que vous vous sentiez inform\xe9e, soutenue et plus confiante \xe0 l'approche de l'accouchement et du post-partum "+appt;
       if(id==="s3") return "Bonjour "+nm+"  nous sommes ravis de vous accompagner durant cette p\xe9riode post-partum.\n\nCes premi\xe8res semaines peuvent \xeatre \xe0 la fois magnifiques, riches en \xe9motions, \xe9puisantes et bouleversantes. Notre objectif est de vous soulager et de vous apporter un soutien pratique et \xe9motionnel pendant votre convalescence et votre adaptation \xe0 la vie avec votre b\xe9b\xe9 \n\nLors de nos visites, nous pouvons nous concentrer sur :\n- Soins aux nouveau-n\xe9s\n- Soutien \xe0 l'alimentation\n- R\xe9cup\xe9ration maternelle\n- Soutien \xe9motionnel\n- Repos et s\xe9r\xe9nit\xe9\n\nVous n'avez pas besoin d'\xeatre parf\xe0itement organis\xe9e avant notre arriv\xe9e "+appt;
@@ -171,7 +173,7 @@ const TR={
       else if(b.deliveryChoice==="delivery") loc=" Livraison";
       else if(b.location==="home") loc=" Visite \xe0 domicile";
       else loc=" "+(s.officeAddress||"Notre cabinet");
-      return "Salut "+b.clientName+"  juste un rappel pour votre rendez-vous de demain !\n\n "+(b.serviceNameFr||b.serviceName)+(b.packageLabelFr||b.packageLabel?" - "+(b.packageLabelFr||b.packageLabel):"")+"\nDate: "+fmtFR(b.date)+"\nTime: "+b.time+"\n"+loc+"\n\nNous avons h\xe2te de vous voir \nN'h\xe9sitez pas \xe0 nous contacter si vous avez besoin de quoi que ce soit avant !";
+      return "Salut "+b.clientName+"  juste un rappel pour votre rendez-vous de demain !\n\n "+(b.serviceNameFr||b.serviceName)+(b.packageLabelFr||b.packageLabel?" - "+(b.packageLabelFr||b.packageLabel):"")+"\nDate: "+fmtFR(normDate(b.date))+"\nTime: "+b.time+"\n"+loc+"\n\nNous avons h\xe2te de vous voir \nN'h\xe9sitez pas \xe0 nous contacter si vous avez besoin de quoi que ce soit avant !";
     },
     waFup:function(b,s){
       return "Salut "+b.clientName+"  nous sommes tellement contents d'avoir pu vous accompagner.\n\nSi vous vous sentez \xe0 l'aise, nous aimerions beaucoup recevoir un court commentaire ou t\xe9moignage de votre part  cela aide vraiment d'autres mamans \xe0 trouver du soutien.\n\nAussi, si vous le souhaitez, nous pouvons vous guider vers la prochaine \xe9tape (soutien post-partum / allaitement / etc.) \n\n- "+(s.consultantName||s.businessName);
@@ -574,7 +576,7 @@ function App(){
   var Hdr=()=><div style={{textAlign:"center",paddingBottom:"1rem",marginBottom:"1rem",borderBottom:"0.5px solid "+C.bdr}}>
     <p style={{fontSize:22,fontWeight:600,margin:"0 0 2px",letterSpacing:"-0.3px",fontFamily:"Georgia,serif",color:C.accent}}>{sett.businessName}</p>
     <p style={{fontSize:13,color:C.t2,margin:0}}>{sett.tagline}</p>
-    <p style={{fontSize:9,color:C.t3,margin:"4px 0 0",letterSpacing:"0.05em"}}>v5.0 - JBS FINAL</p>
+    <p style={{fontSize:9,color:C.t3,margin:"4px 0 0",letterSpacing:"0.05em"}}>v5.1 - JBS FINAL</p>
   </div>;
 
   var ZonePick=({ep})=>{
