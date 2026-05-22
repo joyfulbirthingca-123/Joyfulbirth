@@ -50,7 +50,7 @@ const IcoFile =p=><Ic {...p} d={["M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 0
 const IcoSave =p=><Ic {...p} d={["M19 21H5a2 2 0 01-2-2V5a2 2 0 012-2h11l5 5v11a2 2 0 01-2 2z","M17 21v-8H7v8","M7 3v5h8"]}/>;
 const IcoWrn  =p=><Ic {...p} d={["M12 2a10 10 0 100 20A10 10 0 0012 2z","M12 8v4","M12 16h.01"]}/>;
 const IcoPump =p=><Ic {...p} d={["M9 3H5a2 2 0 00-2 2v14a2 2 0 002 2h14a2 2 0 002-2V8l-5-5z","M9 3v5h6","M8 13h8","M8 17h4"]}/>;
-const IcoBatt =p=><Ic {...p} d={["M23 7h-2a2 2 0 00-2-2H3a2 2 0 00-2 2v10a2 2 0 002 2h16a2 2 0 002-2h2","M7 10h4v4H7z"]}/>;
+const IcoBatt =p=><Ic {...p} d={["M23 7h-2a2 2 0 00-2-2H3a2 2 0 00-2 2v10a2 2 0 002 2h16a2 2 0 002-2h2","M7 10h4v4.8z"]}/>;
 const IcoPlug =p=><Ic {...p} d={["M9 3v2m6-2v2","M7 7h10l-1 8H8z","M9 15v3m6-3v3"]}/>;
 const IcoStar =p=><Ic {...p} d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z"/>;
 const IcoLink =p=><Ic {...p} d={["M10 13a5 5 0 007.54.54l3-3a5 5 0 00-7.07-7.07l-1.72 1.71","M14 11a5 5 0 00-7.54-.54l-3 3a5 5 0 007.07 7.07l1.71-1.71"]}/>;
@@ -392,7 +392,15 @@ function App(){
     return{name:lc.name,desc:lc.desc,pkgs:c.pkgs?(c.pkgs[lang]||c.pkgs.en):null};
   };
 
-  const actPumpCnt=function(pumpId){var pump=(sett.pumpInventory||[]).filter(function(p){return p.id===pumpId;})[0];var pName=pump?pump.name:"";return books.filter(function(b){return b.status==="confirmed"&&(b.pumpId===pumpId||(pName&&b.pumpName===pName));}).length;};
+  const actPumpCnt=function(pumpId){
+    var pump=(sett.pumpInventory||[]).filter(function(p){return p.id===pumpId;})[0];
+    if(!pump)return 0;
+    return books.filter(function(b){
+      if(b.status!=="confirmed")return false;
+      // Match by pumpId (local booking) OR pumpName (cloud booking from Sheets)
+      return b.pumpId===pumpId||b.pumpName===pump.name||b.pumpName===pump.nameFr;
+    }).length;
+  };
   const pumpFree=pump=>(pump.total||0)-actPumpCnt(pump.id);
 
   useEffect(()=>{
@@ -538,7 +546,7 @@ function App(){
   var Hdr=()=><div style={{textAlign:"center",paddingBottom:"1rem",marginBottom:"1rem",borderBottom:"0.5px solid "+C.bdr}}>
     <p style={{fontSize:22,fontWeight:600,margin:"0 0 2px",letterSpacing:"-0.3px",fontFamily:"Georgia,serif",color:C.accent}}>{sett.businessName}</p>
     <p style={{fontSize:13,color:C.t2,margin:0}}>{sett.tagline}</p>
-    <p style={{fontSize:9,color:C.t3,margin:"4px 0 0",letterSpacing:"0.05em"}}>v4.7 - JBS FINAL</p>
+    <p style={{fontSize:9,color:C.t3,margin:"4px 0 0",letterSpacing:"0.05em"}}>v4.8 - JBS FINAL</p>
   </div>;
 
   var ZonePick=({ep})=>{
@@ -598,6 +606,8 @@ function App(){
 
   // -- HOME ------------------------------------------------------
   if(view==="home"){
+    // Fetch cloud bookings on home page so pump availability is accurate
+    if(!booksLoaded&&!booksLoading) fetchAllBookings(false);
     return<div style={S.pg}>
       <Toast/><LangBar/><Hdr/>
       <p style={S.h2}>{tr.bookTitle}</p>
