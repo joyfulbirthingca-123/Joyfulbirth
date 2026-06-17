@@ -1,0 +1,699 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Joyful Birth Services — Staff Dashboard</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:wght@500;600;700&family=DM+Sans:wght@400;500;700&display=swap" rel="stylesheet">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/react/18.2.0/umd/react.production.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.production.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.23.5/babel.min.js"></script>
+<style>
+  :root {
+    --magenta: #DF4893;
+    --magenta-dark: #9E2A66;
+    --magenta-light: #F4A5CD;
+    --pink-pale: #FCEAF3;
+    --grey: #696768;
+    --grey-light: #D9D7D8;
+    --cream: #FAF8F9;
+    --white: #FFFFFF;
+    --ok: #3F9142;
+    --ok-bg: #E8F5E9;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    font-family: 'DM Sans', sans-serif;
+    background: var(--cream);
+    color: var(--grey);
+    min-height: 100vh;
+  }
+  .display { font-family: 'Cormorant Garamond', serif; }
+
+  /* ── Lock screen ── */
+  .lock-screen {
+    min-height: 100vh;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 24px;
+  }
+  .lock-card {
+    background: var(--white);
+    border-radius: 16px;
+    padding: 48px 36px;
+    max-width: 360px;
+    width: 100%;
+    text-align: center;
+    box-shadow: 0 8px 32px rgba(158, 42, 102, 0.08);
+  }
+  .lock-card h1 {
+    font-size: 28px;
+    font-weight: 600;
+    color: var(--magenta-dark);
+    margin-bottom: 4px;
+  }
+  .lock-card p.tagline {
+    font-size: 13px;
+    color: var(--grey);
+    margin-bottom: 32px;
+    letter-spacing: 0.02em;
+  }
+  .pin-input {
+    width: 100%;
+    font-size: 24px;
+    letter-spacing: 8px;
+    text-align: center;
+    padding: 14px;
+    border: 1.5px solid var(--grey-light);
+    border-radius: 10px;
+    font-family: 'DM Sans', sans-serif;
+    margin-bottom: 16px;
+  }
+  .pin-input:focus { outline: none; border-color: var(--magenta); }
+  .btn-primary {
+    width: 100%;
+    background: var(--magenta);
+    color: white;
+    border: none;
+    border-radius: 10px;
+    padding: 14px;
+    font-size: 15px;
+    font-weight: 500;
+    cursor: pointer;
+    transition: background 0.15s;
+    font-family: 'DM Sans', sans-serif;
+  }
+  .btn-primary:hover { background: var(--magenta-dark); }
+  .btn-primary:disabled { background: var(--grey-light); cursor: not-allowed; }
+  .error-text { color: #C0392B; font-size: 13px; margin-top: 10px; }
+
+  /* ── Shell ── */
+  .shell { display: flex; min-height: 100vh; }
+  .sidebar {
+    width: 220px;
+    background: var(--white);
+    border-right: 1px solid var(--grey-light);
+    padding: 28px 16px;
+    display: flex;
+    flex-direction: column;
+  }
+  .sidebar .brand {
+    font-size: 20px;
+    font-weight: 600;
+    color: var(--magenta-dark);
+    margin-bottom: 4px;
+    padding: 0 8px;
+  }
+  .sidebar .staff-name {
+    font-size: 12px;
+    color: var(--grey);
+    padding: 0 8px;
+    margin-bottom: 28px;
+  }
+  .nav-item {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 11px 12px;
+    border-radius: 8px;
+    cursor: pointer;
+    font-size: 14px;
+    font-weight: 500;
+    color: var(--grey);
+    margin-bottom: 4px;
+    transition: background 0.12s;
+  }
+  .nav-item:hover { background: var(--pink-pale); }
+  .nav-item.active { background: var(--magenta); color: white; }
+  .nav-spacer { flex: 1; }
+  .logout-link {
+    font-size: 12px;
+    color: var(--grey);
+    padding: 8px 12px;
+    cursor: pointer;
+    text-decoration: underline;
+  }
+
+  .main { flex: 1; padding: 32px 40px; max-width: 1100px; }
+  .page-title {
+    font-size: 26px;
+    font-weight: 600;
+    font-family: 'Cormorant Garamond', serif;
+    color: var(--magenta-dark);
+    margin-bottom: 6px;
+  }
+  .page-sub { font-size: 13px; color: var(--grey); margin-bottom: 28px; }
+
+  .card {
+    background: var(--white);
+    border-radius: 12px;
+    padding: 20px 22px;
+    margin-bottom: 14px;
+    border: 1px solid var(--grey-light);
+  }
+  .card-row {
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+    gap: 16px;
+  }
+  .appt-date-block {
+    background: var(--pink-pale);
+    border-radius: 10px;
+    padding: 8px 14px;
+    text-align: center;
+    min-width: 64px;
+  }
+  .appt-date-block .day { font-size: 20px; font-weight: 700; color: var(--magenta-dark); line-height: 1; }
+  .appt-date-block .mon { font-size: 11px; color: var(--magenta); text-transform: uppercase; letter-spacing: 0.05em; }
+  .appt-info { flex: 1; }
+  .appt-client { font-size: 15px; font-weight: 600; color: var(--grey); }
+  .appt-service { font-size: 13px; color: var(--grey); opacity: 0.85; margin-top: 2px; }
+  .appt-meta { font-size: 12px; color: var(--magenta); margin-top: 4px; }
+  .badge {
+    font-size: 11px;
+    font-weight: 500;
+    padding: 4px 10px;
+    border-radius: 20px;
+    background: var(--pink-pale);
+    color: var(--magenta-dark);
+    white-space: nowrap;
+  }
+  .empty-state {
+    text-align: center;
+    padding: 48px 20px;
+    color: var(--grey);
+    font-size: 14px;
+  }
+
+  /* Client list */
+  .client-card {
+    background: var(--white);
+    border-radius: 12px;
+    padding: 18px 22px;
+    margin-bottom: 12px;
+    border: 1px solid var(--grey-light);
+    cursor: pointer;
+    transition: border-color 0.12s;
+  }
+  .client-card:hover { border-color: var(--magenta-light); }
+  .client-header { display: flex; justify-content: space-between; align-items: center; }
+  .client-name { font-size: 16px; font-weight: 600; color: var(--grey); }
+  .client-services { font-size: 12px; color: var(--grey); opacity: 0.8; margin-top: 3px; }
+
+  .dots-row { display: flex; gap: 6px; margin-top: 12px; }
+  .dot {
+    width: 28px; height: 28px;
+    border-radius: 50%;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 12px; font-weight: 700;
+    border: 2px solid var(--grey-light);
+    color: var(--grey-light);
+    cursor: pointer;
+    transition: all 0.15s;
+  }
+  .dot.done { background: var(--magenta); border-color: var(--magenta); color: white; }
+  .dot:hover { border-color: var(--magenta); }
+
+  .next-session-tag {
+    font-size: 12px;
+    color: var(--magenta-dark);
+    font-weight: 500;
+    margin-top: 10px;
+    background: var(--pink-pale);
+    display: inline-block;
+    padding: 4px 10px;
+    border-radius: 6px;
+  }
+
+  .search-bar {
+    width: 100%;
+    padding: 12px 16px;
+    border: 1.5px solid var(--grey-light);
+    border-radius: 10px;
+    font-size: 14px;
+    margin-bottom: 20px;
+    font-family: 'DM Sans', sans-serif;
+  }
+  .search-bar:focus { outline: none; border-color: var(--magenta); }
+
+  /* Modal */
+  .modal-overlay {
+    position: fixed; inset: 0;
+    background: rgba(105, 103, 104, 0.4);
+    display: flex; align-items: center; justify-content: center;
+    z-index: 100;
+    padding: 20px;
+  }
+  .modal-box {
+    background: white;
+    border-radius: 16px;
+    padding: 32px;
+    max-width: 480px;
+    width: 100%;
+    max-height: 85vh;
+    overflow-y: auto;
+  }
+  .modal-box h2 { font-family: 'Cormorant Garamond', serif; color: var(--magenta-dark); font-size: 22px; margin-bottom: 4px; }
+  .session-row {
+    display: flex;
+    align-items: center;
+    gap: 14px;
+    padding: 14px 0;
+    border-bottom: 1px solid var(--grey-light);
+  }
+  .session-row:last-child { border-bottom: none; }
+  .session-checkbox {
+    width: 24px; height: 24px;
+    border-radius: 6px;
+    border: 2px solid var(--grey-light);
+    cursor: pointer;
+    display: flex; align-items: center; justify-content: center;
+    flex-shrink: 0;
+  }
+  .session-checkbox.checked { background: var(--ok); border-color: var(--ok); color: white; }
+  .session-label { font-size: 14px; color: var(--grey); }
+  .close-btn {
+    margin-top: 24px;
+    width: 100%;
+    background: var(--grey-light);
+    color: var(--grey);
+    border: none;
+    border-radius: 10px;
+    padding: 12px;
+    font-size: 14px;
+    cursor: pointer;
+    font-family: 'DM Sans', sans-serif;
+  }
+
+  /* Stats */
+  .stats-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+    gap: 14px;
+    margin-bottom: 24px;
+  }
+  .stat-box {
+    background: white;
+    border-radius: 12px;
+    padding: 20px;
+    border: 1px solid var(--grey-light);
+  }
+  .stat-box .num { font-size: 30px; font-weight: 700; color: var(--magenta-dark); font-family: 'Cormorant Garamond', serif; }
+  .stat-box .label { font-size: 12px; color: var(--grey); margin-top: 2px; }
+  .month-selector { display: flex; gap: 10px; align-items: center; margin-bottom: 20px; }
+  .month-selector select {
+    padding: 8px 12px; border-radius: 8px; border: 1.5px solid var(--grey-light);
+    font-family: 'DM Sans', sans-serif; font-size: 14px;
+  }
+  .service-row {
+    display: flex; justify-content: space-between;
+    padding: 12px 0; border-bottom: 1px solid var(--grey-light);
+    font-size: 14px;
+  }
+  .service-row:last-child { border-bottom: none; }
+  .loading { text-align: center; padding: 60px; color: var(--grey); font-size: 14px; }
+
+  @media (max-width: 720px) {
+    .shell { flex-direction: column; }
+    .sidebar { width: 100%; flex-direction: row; overflow-x: auto; padding: 14px; }
+    .sidebar .brand, .sidebar .staff-name, .nav-spacer, .logout-link { display: none; }
+    .main { padding: 20px; }
+  }
+</style>
+</head>
+<body>
+<div id="root"></div>
+<script type="text/babel">
+const { useState, useEffect, useCallback } = React;
+
+// ───────────────────────────────────────────────────────────
+// CONFIG — paste your Apps Script Web App URL below
+// ───────────────────────────────────────────────────────────
+const API_URL = "https://script.google.com/macros/s/AKfycbyfuYJIdtg0nbio2tZdbXKfnbXBHHlit47Joc9yaidfAjG0BkJMbSdirQRK4qPdrq4Q/exec";
+
+function apiCall(params) {
+  const url = API_URL + "?" + new URLSearchParams(params).toString();
+  return fetch(url).then(r => r.json());
+}
+
+function LockScreen({ onLogin }) {
+  const [pin, setPin] = useState("");
+  const [error, setError] = useState("");
+  const [loading, setLoading] = useState(false);
+
+  const submit = () => {
+    if (!pin) return;
+    setLoading(true);
+    setError("");
+    apiCall({ action: "login", pin }).then(res => {
+      setLoading(false);
+      if (res.success) {
+        localStorage.setItem("jbs_pin", pin);
+        onLogin(res.staff, pin);
+      } else {
+        setError(res.error || "PIN not recognized");
+      }
+    }).catch(() => {
+      setLoading(false);
+      setError("Connection error — check your internet and try again");
+    });
+  };
+
+  return (
+    <div className="lock-screen">
+      <div className="lock-card">
+        <h1 className="display">Joyful Birth</h1>
+        <p className="tagline">Staff Dashboard</p>
+        <input
+          className="pin-input"
+          type="password"
+          inputMode="numeric"
+          maxLength={6}
+          placeholder="••••"
+          value={pin}
+          onChange={e => setPin(e.target.value.replace(/\D/g, ""))}
+          onKeyDown={e => e.key === "Enter" && submit()}
+          autoFocus
+        />
+        <button className="btn-primary" onClick={submit} disabled={loading}>
+          {loading ? "Checking..." : "Enter"}
+        </button>
+        {error && <p className="error-text">{error}</p>}
+      </div>
+    </div>
+  );
+}
+
+function formatDateBlock(dateStr) {
+  if (!dateStr) return { day: "—", mon: "" };
+  const d = new Date(dateStr);
+  const months = ["JAN","FEB","MAR","APR","MAY","JUN","JUL","AUG","SEP","OCT","NOV","DEC"];
+  return { day: d.getDate(), mon: months[d.getMonth()] };
+}
+
+function TodayView({ data }) {
+  if (!data.upcoming || data.upcoming.length === 0) {
+    return (
+      <div>
+        <h1 className="page-title">Upcoming appointments</h1>
+        <p className="page-sub">Everything coming up across your client list</p>
+        <div className="card empty-state">No upcoming appointments scheduled.</div>
+      </div>
+    );
+  }
+  return (
+    <div>
+      <h1 className="page-title">Upcoming appointments</h1>
+      <p className="page-sub">{data.upcoming.length} appointment{data.upcoming.length !== 1 ? "s" : ""} coming up</p>
+      {data.upcoming.map((a, i) => {
+        const db = formatDateBlock(a.date);
+        return (
+          <div className="card" key={i}>
+            <div className="card-row">
+              <div className="appt-date-block">
+                <div className="day">{db.day}</div>
+                <div className="mon">{db.mon}</div>
+              </div>
+              <div className="appt-info">
+                <div className="appt-client">{a.clientName}</div>
+                <div className="appt-service">{a.service}</div>
+                <div className="appt-meta">{a.time}{a.location ? " · " + a.location : ""}</div>
+              </div>
+              {a.staff && <span className="badge">{a.staff}</span>}
+            </div>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+function ClientProgressModal({ client, pin, onClose, onUpdated }) {
+  const [progress, setProgress] = useState(null);
+
+  useEffect(() => {
+    apiCall({ action: "getClientProgress", pin, clientName: client.name }).then(res => {
+      if (res.success) setProgress(res.progress);
+    });
+  }, [client]);
+
+  const toggle = (sessionId, current) => {
+    const newVal = !current;
+    setProgress(p => p.map(s => s.id === sessionId ? { ...s, completed: newVal } : s));
+    apiCall({
+      action: "updateProgress",
+      pin,
+      clientName: client.name,
+      phone: client.phone,
+      location: client.location,
+      sessionId,
+      completed: newVal
+    }).then(() => onUpdated());
+  };
+
+  return (
+    <div className="modal-overlay" onClick={onClose}>
+      <div className="modal-box" onClick={e => e.stopPropagation()}>
+        <h2>{client.name}</h2>
+        <p className="page-sub" style={{marginBottom: "20px"}}>Childbirth education progress</p>
+        {!progress && <div className="loading">Loading...</div>}
+        {progress && progress.map(s => (
+          <div className="session-row" key={s.id}>
+            <div
+              className={"session-checkbox" + (s.completed ? " checked" : "")}
+              onClick={() => toggle(s.id, s.completed)}
+            >
+              {s.completed ? "✓" : ""}
+            </div>
+            <div className="session-label">{s.name}</div>
+          </div>
+        ))}
+        <button className="close-btn" onClick={onClose}>Done</button>
+      </div>
+    </div>
+  );
+}
+
+function ClientsView({ data, pin, onRefresh }) {
+  const [search, setSearch] = useState("");
+  const [selectedClient, setSelectedClient] = useState(null);
+  const [progressCache, setProgressCache] = useState({});
+
+  useEffect(() => {
+    data.clients.filter(c => c.isCBE).forEach(c => {
+      if (!progressCache[c.name]) {
+        apiCall({ action: "getClientProgress", pin, clientName: c.name }).then(res => {
+          if (res.success) {
+            setProgressCache(prev => ({ ...prev, [c.name]: res.progress }));
+          }
+        });
+      }
+    });
+  }, [data.clients]);
+
+  const filtered = data.clients.filter(c =>
+    c.name.toLowerCase().includes(search.toLowerCase())
+  );
+
+  const refreshProgress = (clientName) => {
+    apiCall({ action: "getClientProgress", pin, clientName }).then(res => {
+      if (res.success) setProgressCache(prev => ({ ...prev, [clientName]: res.progress }));
+    });
+  };
+
+  return (
+    <div>
+      <h1 className="page-title">Clients</h1>
+      <p className="page-sub">{data.clients.length} client{data.clients.length !== 1 ? "s" : ""} on file</p>
+      <input
+        className="search-bar"
+        placeholder="Search clients..."
+        value={search}
+        onChange={e => setSearch(e.target.value)}
+      />
+      {filtered.length === 0 && <div className="card empty-state">No clients match that search.</div>}
+      {filtered.map((c, i) => {
+        const prog = progressCache[c.name];
+        const nextSession = prog ? prog.find(s => !s.completed) : null;
+        return (
+          <div className="client-card" key={i} onClick={() => c.isCBE && setSelectedClient(c)}>
+            <div className="client-header">
+              <div>
+                <div className="client-name">{c.name}</div>
+                <div className="client-services">{c.services.join(", ")}</div>
+              </div>
+              {c.location && <span className="badge">{c.location}</span>}
+            </div>
+            {c.isCBE && prog && (
+              <React.Fragment>
+                <div className="dots-row">
+                  {prog.map(s => (
+                    <div key={s.id} className={"dot" + (s.completed ? " done" : "")}>
+                      {s.id}
+                    </div>
+                  ))}
+                </div>
+                {nextSession ? (
+                  <div className="next-session-tag">Next up: {nextSession.name}</div>
+                ) : (
+                  <div className="next-session-tag">All sessions complete</div>
+                )}
+              </React.Fragment>
+            )}
+          </div>
+        );
+      })}
+      {selectedClient && (
+        <ClientProgressModal
+          client={selectedClient}
+          pin={pin}
+          onClose={() => setSelectedClient(null)}
+          onUpdated={() => refreshProgress(selectedClient.name)}
+        />
+      )}
+    </div>
+  );
+}
+
+function StatsView({ pin }) {
+  const now = new Date();
+  const [month, setMonth] = useState(now.getMonth() + 1);
+  const [year, setYear] = useState(now.getFullYear());
+  const [stats, setStats] = useState(null);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    setLoading(true);
+    apiCall({ action: "getMonthlyStats", pin, month, year }).then(res => {
+      if (res.success) setStats(res);
+      setLoading(false);
+    });
+  }, [month, year]);
+
+  const monthNames = ["January","February","March","April","May","June","July","August","September","October","November","December"];
+
+  return (
+    <div>
+      <h1 className="page-title">Monthly summary</h1>
+      <p className="page-sub">Counts and revenue by service — use this for invoicing and reporting</p>
+      <div className="month-selector">
+        <select value={month} onChange={e => setMonth(parseInt(e.target.value))}>
+          {monthNames.map((m, i) => <option key={i} value={i+1}>{m}</option>)}
+        </select>
+        <select value={year} onChange={e => setYear(parseInt(e.target.value))}>
+          {[year-1, year, year+1].map(y => <option key={y} value={y}>{y}</option>)}
+        </select>
+      </div>
+
+      {loading && <div className="loading">Loading stats...</div>}
+
+      {!loading && stats && (
+        <React.Fragment>
+          <div className="stats-grid">
+            <div className="stat-box">
+              <div className="num">{stats.totalBookings}</div>
+              <div className="label">Total appointments</div>
+            </div>
+            <div className="stat-box">
+              <div className="num">{stats.totalRevenue.toFixed(0)} TND</div>
+              <div className="label">Total revenue</div>
+            </div>
+          </div>
+
+          <div className="card">
+            <h2 className="display" style={{fontSize: "18px", color: "var(--magenta-dark)", marginBottom: "8px"}}>
+              By service
+            </h2>
+            {Object.keys(stats.byService).length === 0 && (
+              <p style={{fontSize: "13px", color: "var(--grey)", padding: "12px 0"}}>No bookings this month.</p>
+            )}
+            {Object.entries(stats.byService).map(([service, info]) => (
+              <div className="service-row" key={service}>
+                <span>{service}</span>
+                <span>{info.count} · {info.revenue.toFixed(0)} TND</span>
+              </div>
+            ))}
+          </div>
+        </React.Fragment>
+      )}
+    </div>
+  );
+}
+
+function Dashboard({ staff, pin, onLogout }) {
+  const [view, setView] = useState("today");
+  const [data, setData] = useState(null);
+
+  const loadData = useCallback(() => {
+    apiCall({ action: "getDashboard", pin }).then(res => {
+      if (res.success) setData(res);
+    });
+  }, [pin]);
+
+  useEffect(() => { loadData(); }, [loadData]);
+
+  return (
+    <div className="shell">
+      <div className="sidebar">
+        <div className="brand display">Joyful Birth</div>
+        <div className="staff-name">{staff.name} · {staff.role === "owner" ? "Owner" : staff.location}</div>
+        <div className={"nav-item" + (view === "today" ? " active" : "")} onClick={() => setView("today")}>
+          Today
+        </div>
+        <div className={"nav-item" + (view === "clients" ? " active" : "")} onClick={() => setView("clients")}>
+          Clients
+        </div>
+        <div className={"nav-item" + (view === "stats" ? " active" : "")} onClick={() => setView("stats")}>
+          Monthly summary
+        </div>
+        <div className="nav-spacer"></div>
+        <div className="logout-link" onClick={onLogout}>Log out</div>
+      </div>
+      <div className="main">
+        {!data && <div className="loading">Loading dashboard...</div>}
+        {data && view === "today" && <TodayView data={data} />}
+        {data && view === "clients" && <ClientsView data={data} pin={pin} onRefresh={loadData} />}
+        {data && view === "stats" && <StatsView pin={pin} />}
+      </div>
+    </div>
+  );
+}
+
+function App() {
+  const [staff, setStaff] = useState(null);
+  const [pin, setPin] = useState(null);
+
+  useEffect(() => {
+    const savedPin = localStorage.getItem("jbs_pin");
+    if (savedPin) {
+      apiCall({ action: "login", pin: savedPin }).then(res => {
+        if (res.success) {
+          setStaff(res.staff);
+          setPin(savedPin);
+        } else {
+          localStorage.removeItem("jbs_pin");
+        }
+      });
+    }
+  }, []);
+
+  const handleLogout = () => {
+    localStorage.removeItem("jbs_pin");
+    setStaff(null);
+    setPin(null);
+  };
+
+  if (!staff) {
+    return <LockScreen onLogin={(s, p) => { setStaff(s); setPin(p); }} />;
+  }
+
+  return <Dashboard staff={staff} pin={pin} onLogout={handleLogout} />;
+}
+
+ReactDOM.createRoot(document.getElementById("root")).render(<App />);
+</script>
+</body>
+</html>
