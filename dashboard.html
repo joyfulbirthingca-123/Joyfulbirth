@@ -686,6 +686,17 @@ function apiRead(params, onData) {
   return readInflight[key].then(res => { onData(res, true); return res; });
 }
 
+// Shown whenever a screen could not load, so a failed request never looks like
+// "you have no appointments/clients". Nothing is lost — it is only the connection.
+function LoadError({ message, onRetry }) {
+  return (
+    <div style={{background: "#FEF3CD", color: "#92400E", borderRadius: 8, padding: "10px 14px", margin: "12px 0", fontSize: 13, display: "flex", alignItems: "center", gap: 12}}>
+      <span style={{flex: 1}}>{message || "Couldn't load this."} Your data is safe — this is just a slow or dropped connection.</span>
+      <button className="btn-small" onClick={onRetry}>Retry</button>
+    </div>
+  );
+}
+
 const FR_MONTHS_SHARED = ["janvier", "février", "mars", "avril", "mai", "juin", "juillet", "août", "septembre", "octobre", "novembre", "décembre"];
 function frenchMonthForDate(d) {
   const dt = d ? new Date(d) : new Date();
@@ -2481,6 +2492,7 @@ function ClientsView({ pin, currentStaff }) {
   const [showImport, setShowImport] = useState(false);
   const [showMerge, setShowMerge] = useState(false);
   const [importMsg, setImportMsg] = useState("");
+  const [loadError, setLoadError] = useState("");
 
   const load = () => {
     // Only show "Loading..." when there is nothing on screen yet; otherwise
@@ -2491,6 +2503,9 @@ function ClientsView({ pin, currentStaff }) {
         setClients(res.clients);
         setPackages(res.packages);
         if (res.staffList) setStaffList(res.staffList);
+        setLoadError("");
+      } else if (clients.length === 0) {
+        setLoadError(res.error || "Couldn't load your clients.");
       }
       setLoading(false);
     });
@@ -2619,7 +2634,8 @@ function ClientsView({ pin, currentStaff }) {
           )}
         </p>
       )}
-      {!loading && sorted.length === 0 && <div className="card empty-state">No clients match those filters.</div>}
+      {loadError && <LoadError message={loadError} onRetry={() => { setLoadError(""); load(); }} />}
+      {!loading && !loadError && sorted.length === 0 && <div className="card empty-state">No clients match those filters.</div>}
 
       {!loading && sorted.map((c, i) => (
         <div className="client-card" key={c.id || i} onClick={() => setSelectedClient(c)}>
@@ -3268,15 +3284,25 @@ function CalendarView({ pin, currentStaff }) {
   const monthNames = ["January","February","March","April","May","June","July","August","September","October","November","December"];
   const dow = ["Mon","Tue","Wed","Thu","Fri","Sat","Sun"];
 
+  const [loadError, setLoadError] = useState("");
+  const [reloadTick, setReloadTick] = useState(0);
+
   useEffect(() => {
+    let cancelled = false; // ignore a slow answer for a month we've since left
+    let shown = false;
     setLoading(true);
+    setLoadError("");
+    setAppointments([]); // never show one month's events under another month's title
     setSelectedDay(null);
     setSelectedAppt(null);
     apiRead({ action: "getCalendarAppointments", pin, month, year }, res => {
-      if (res.success) setAppointments(res.appointments);
+      if (cancelled) return;
+      if (res.success) { shown = true; setAppointments(res.appointments); setLoadError(""); }
+      else if (!shown) setLoadError(res.error || "Couldn't load this month's appointments.");
       setLoading(false);
     });
-  }, [month, year, pin]);
+    return () => { cancelled = true; };
+  }, [month, year, pin, reloadTick]);
 
   useEffect(() => {
     apiRead({ action: "getClients", pin }, res => {
@@ -3349,6 +3375,8 @@ function CalendarView({ pin, currentStaff }) {
         {loading && <span style={{fontSize: 12, color: "var(--grey)"}}>Loading...</span>}
         <button className="btn-small" style={{marginLeft: "auto"}} onClick={printCalendar}>Print month</button>
       </div>
+
+      {loadError && <LoadError message={loadError} onRetry={() => setReloadTick(t => t + 1)} />}
 
       <div className="cal-grid">
         {dow.map(d => <div className="cal-dow" key={d}>{d}</div>)}
@@ -3710,13 +3738,16 @@ function GroupClassesView({ pin, currentStaff }) {
 function MessagesView({ pin }) {
   const [data, setData] = useState(null);
   const [lang, setLang] = useState("en");
+  const [loadError, setLoadError] = useState("");
+  const [reloadTick, setReloadTick] = useState(0);
   const reviewMissing = GOOGLE_REVIEW_LINK.indexOf("PASTE_") === 0;
 
   useEffect(() => {
     apiRead({ action: "getMessageQueue", pin }, res => {
-      if (res.success) setData(res);
+      if (res.success) { setData(res); setLoadError(""); }
+      else setLoadError(res.error || "Couldn't load your messages.");
     });
-  }, [pin]);
+  }, [pin, reloadTick]);
 
   const Row = ({ a, message }) => {
     const hasPhone = String(a.phone || "").replace(/[^\d]/g, "").length > 0;
@@ -3749,7 +3780,8 @@ function MessagesView({ pin }) {
         <span className={"assign-chip" + (lang === "fr" ? " on" : "")} onClick={() => setLang("fr")}>Français</span>
       </div>
 
-      {!data && <div className="loading">Loading...</div>}
+      {!data && !loadError && <div className="loading">Loading...</div>}
+      {!data && loadError && <LoadError message={loadError} onRetry={() => { setLoadError(""); setReloadTick(t => t + 1); }} />}
 
       {data && (
         <React.Fragment>
@@ -3988,9 +4020,12 @@ function Dashboard({ staff, pin, onLogout }) {
   const [packages, setPackages] = useState([]);
   const [staffList, setStaffList] = useState([]);
 
+  const [loadError, setLoadError] = useState("");
+
   const loadData = useCallback(() => {
     apiRead({ action: "getDashboard", pin }, res => {
-      if (res.success) setData(res);
+      if (res.success) { setData(res); setLoadError(""); }
+      else setLoadError(res.error || "Couldn't load the dashboard.");
     });
   }, [pin]);
 
@@ -4059,7 +4094,8 @@ function Dashboard({ staff, pin, onLogout }) {
         <div className="logout-link" onClick={onLogout}>Sign out</div>
       </div>
       <div className="main">
-        {!data && <div className="loading">Loading dashboard...</div>}
+        {!data && !loadError && <div className="loading">Loading dashboard...</div>}
+        {!data && loadError && <LoadError message={loadError} onRetry={() => { setLoadError(""); loadData(); }} />}
         {data && view === "today" && <TodayView pin={pin} data={data} onRefresh={loadData} />}
         {data && view === "calendar" && <CalendarView pin={pin} currentStaff={staff} />}
         {data && view === "groups" && <GroupClassesView pin={pin} currentStaff={staff} />}
