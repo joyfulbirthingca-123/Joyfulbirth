@@ -3401,198 +3401,6 @@ function CalendarView({ pin, currentStaff }) {
   );
 }
 
-function OnboardingView({ pin, packages, staffList, currentStaff }) {
-  const [name, setName] = useState("");
-  const [phone, setPhone] = useState("");
-  const [email, setEmail] = useState("");
-  const [packageId, setPackageId] = useState(null);
-  const [customPrice, setCustomPrice] = useState("");
-  const [location, setLocation] = useState(currentStaff ? currentStaff.location : "Sousse");
-  const [assigned, setAssigned] = useState([]);
-
-  const [ficheChecked, setFicheChecked] = useState(false);
-  const [ficheFinding, setFicheFinding] = useState(false);
-  const [ficheResult, setFicheResult] = useState(null); // {found, source, ...}
-
-  const [creating, setCreating] = useState(false);
-  const [createdMsg, setCreatedMsg] = useState("");
-  const [whichFiche, setWhichFiche] = useState("general");
-
-  const locations = ["Sousse", "Tunis"];
-  const selectedPkg = packages.find(p => p.id === packageId);
-  const canSave = name.trim() && phone.trim() && packageId;
-
-  const toggleAssigned = (s) => setAssigned(prev => prev.includes(s) ? prev.filter(x => x !== s) : [...prev, s]);
-
-  const checkFiche = () => {
-    if (!phone.trim()) { setFicheResult({ found: false, error: "Enter a phone number first." }); setFicheChecked(true); return; }
-    setFicheFinding(true);
-    setFicheChecked(false);
-    apiCall({ action: "lookupFicheByPhone", pin, phone }).then(res => {
-      setFicheFinding(false);
-      setFicheChecked(true);
-      if (res.success && res.found) {
-        setFicheResult(res);
-        // Pre-fill from the fiche
-        if (res.name && !name) setName(res.name);
-        if (res.email && !email) setEmail(res.email);
-        if (res.suggestedPackageId && !packageId) setPackageId(res.suggestedPackageId);
-      } else {
-        setFicheResult({ found: false });
-      }
-    });
-  };
-
-  const create = () => {
-    if (!canSave) return;
-    setCreating(true);
-    apiCall({
-      action: "createClient",
-      pin,
-      clientName: name,
-      phone,
-      email,
-      packageId,
-      customPrice: customPrice || "",
-      location: location || (currentStaff ? currentStaff.location : ""),
-      assignedStaff: assigned.join(", ")
-    }).then(res => {
-      setCreating(false);
-      if (res.success) {
-        setCreatedMsg(name + " has been added as a client.");
-        // Reset the form for the next person
-        setName(""); setPhone(""); setEmail(""); setPackageId(null);
-        setCustomPrice(""); setAssigned([]); setFicheChecked(false); setFicheResult(null);
-        setTimeout(() => setCreatedMsg(""), 6000);
-      } else {
-        setCreatedMsg(res.error || "Could not create the client.");
-      }
-    });
-  };
-
-  // Build a WhatsApp link with a pre-filled message containing the fiche link.
-  const ficheLink = whichFiche === "breastfeeding" ? FICHE_LINK_BREASTFEEDING : FICHE_LINK_GENERAL;
-  const waMessage =
-    "Hello" + (name ? " " + name.split(" ")[0] : "") + "! This is Joyful Birth Services. " +
-    "To get started, please fill out this short intake form so we can prepare for you: " + ficheLink +
-    " — thank you! 💛";
-  const waDigits = phone.replace(/[^\d]/g, "");
-  const waLink = "https://wa.me/" + waDigits + "?text=" + encodeURIComponent(waMessage);
-  const ficheLinkMissing = whichFiche === "breastfeeding" && FICHE_LINK_BREASTFEEDING.indexOf("PASTE_") === 0;
-
-  return (
-    <div>
-      <h1 className="page-title">Onboard a new client</h1>
-      <p className="page-sub">Add their details, pull an existing fiche if they filled one, and create their profile — or send them a fiche to fill.</p>
-
-      {createdMsg && (
-        <div style={{background: "var(--ok-bg)", color: "var(--ok)", borderRadius: 8, padding: "10px 14px", marginBottom: 16, fontSize: 13}}>
-          {createdMsg}
-        </div>
-      )}
-
-      <div className="card">
-        <div className="component-label">1 · Contact details</div>
-        <div className="form-group">
-          <label className="form-label">Client name</label>
-          <input className="form-input" value={name} onChange={e => setName(e.target.value)} />
-        </div>
-        <div className="form-group">
-          <label className="form-label">Phone (WhatsApp)</label>
-          <div style={{display: "flex", gap: 8}}>
-            <input className="form-input" value={phone} onChange={e => setPhone(e.target.value)} placeholder="+216 ..." />
-            <button className="btn-small" onClick={checkFiche} disabled={ficheFinding} style={{whiteSpace: "nowrap"}}>
-              {ficheFinding ? "Checking..." : "Check for fiche"}
-            </button>
-          </div>
-        </div>
-        <div className="form-group">
-          <label className="form-label">Email (optional)</label>
-          <input className="form-input" value={email} onChange={e => setEmail(e.target.value)} />
-        </div>
-
-        {ficheChecked && ficheResult && ficheResult.found && (
-          <div style={{background: "var(--ok-bg)", color: "var(--ok)", borderRadius: 8, padding: "10px 12px", fontSize: 12, marginBottom: 6}}>
-            Found a {ficheResult.source} for this number — name, email, and suggested package filled in below. Double-check before saving.
-          </div>
-        )}
-        {ficheChecked && ficheResult && !ficheResult.found && (
-          <div style={{background: "#FEF3CD", color: "#92400E", borderRadius: 8, padding: "10px 12px", fontSize: 12, marginBottom: 6}}>
-            {ficheResult.error ? ficheResult.error : "No fiche found for this number yet. You can still create the profile below, or send them a fiche to fill (further down)."}
-          </div>
-        )}
-      </div>
-
-      <div className="card">
-        <div className="component-label">2 · Package &amp; assignment</div>
-        <div className="form-group">
-          <label className="form-label">Location</label>
-          <select className="form-select" value={location} onChange={e => setLocation(e.target.value)}>
-            {locations.map(l => <option key={l} value={l}>{l}</option>)}
-          </select>
-        </div>
-        <div className="form-group">
-          <label className="form-label">Package</label>
-          {packages.map(p => (
-            <div key={p.id} className={"pkg-option" + (packageId === p.id ? " selected" : "")} onClick={() => setPackageId(p.id)}>
-              <span className="pname">{p.name}</span>
-              <span className="pprice">{p.price} TND</span>
-            </div>
-          ))}
-        </div>
-        {selectedPkg && (
-          <div className="form-group">
-            <label className="form-label">Custom price (optional)</label>
-            <input className="form-input" type="number" placeholder={selectedPkg.price + " TND (default)"} value={customPrice} onChange={e => setCustomPrice(e.target.value)} />
-          </div>
-        )}
-        {staffList && staffList.length > 0 && (
-          <div className="form-group">
-            <label className="form-label">Assigned staff</label>
-            <div className="assign-chips">
-              {staffList.map(s => (
-                <span key={s.name} className={"assign-chip" + (assigned.includes(s.name) ? " on" : "")} onClick={() => toggleAssigned(s.name)}>
-                  {s.name}
-                </span>
-              ))}
-            </div>
-          </div>
-        )}
-        <button className="btn-confirm" style={{marginTop: 6}} disabled={!canSave || creating} onClick={create}>
-          {creating ? "Creating..." : "Create client profile"}
-        </button>
-      </div>
-
-      <div className="card">
-        <div className="component-label">Send a fiche to fill (optional)</div>
-        <p style={{fontSize: 12, color: "var(--grey)", marginBottom: 10}}>
-          If they haven't filled a fiche, send them the right one over WhatsApp. Enter their phone above first.
-        </p>
-        <div className="assign-chips" style={{marginBottom: 10}}>
-          <span className={"assign-chip" + (whichFiche === "general" ? " on" : "")} onClick={() => setWhichFiche("general")}>General fiche</span>
-          <span className={"assign-chip" + (whichFiche === "breastfeeding" ? " on" : "")} onClick={() => setWhichFiche("breastfeeding")}>Breastfeeding fiche</span>
-        </div>
-        {ficheLinkMissing ? (
-          <p style={{fontSize: 12, color: "#92400E"}}>
-            The breastfeeding fiche link hasn't been set yet — add it near the top of the dashboard file (FICHE_LINK_BREASTFEEDING) to enable this.
-          </p>
-        ) : (
-          <a
-            href={waDigits ? waLink : undefined}
-            target="_blank"
-            rel="noopener noreferrer"
-            className="btn-small"
-            style={{display: "inline-block", textDecoration: "none", opacity: waDigits ? 1 : 0.5, pointerEvents: waDigits ? "auto" : "none"}}
-          >
-            Open WhatsApp message
-          </a>
-        )}
-        {!waDigits && <p style={{fontSize: 11, color: "var(--grey)", marginTop: 6}}>Enter a phone number above to enable this.</p>}
-      </div>
-    </div>
-  );
-}
-
 function GroupClassesView({ pin, currentStaff }) {
   const [clients, setClients] = useState([]);
   const [classes, setClasses] = useState(null);
@@ -4078,131 +3886,6 @@ function ReportsView({ pin }) {
   );
 }
 
-function BackfillView({ pin, packages, staffList, currentStaff }) {
-  const blank = () => ({ date: "", time: "", clientName: "", phone: "", service: "", basePrice: "", location: "", staff: "", notes: "" });
-  const [rows, setRows] = useState([blank(), blank(), blank()]);
-  const [busy, setBusy] = useState(false);
-  const [msg, setMsg] = useState("");
-  const [makeProfiles, setMakeProfiles] = useState(true);
-
-  const setField = (i, field, val) => setRows(prev => prev.map((r, idx) => idx === i ? { ...r, [field]: val } : r));
-  const addRow = () => setRows(prev => [...prev, blank()]);
-  const removeRow = (i) => setRows(prev => prev.filter((_, idx) => idx !== i));
-
-  // Picking a package fills the service name and its standard price
-  const pickPackage = (i, pkgId) => {
-    const pkg = packages.find(p => p.id === pkgId);
-    if (!pkg) { setField(i, "service", ""); return; }
-    setRows(prev => prev.map((r, idx) => idx === i ? { ...r, service: pkg.name, basePrice: r.basePrice || String(pkg.price) } : r));
-  };
-
-  const filled = rows.filter(r => r.date && r.clientName);
-
-  const submit = () => {
-    if (filled.length === 0) { setMsg("Add at least one row with a date and client name."); return; }
-    setBusy(true);
-    setMsg("");
-    apiCall({
-      action: "bulkAddAppointments",
-      pin,
-      rows: JSON.stringify(filled),
-      createProfiles: makeProfiles ? "yes" : "no"
-    }).then(res => {
-      setBusy(false);
-      if (res && res.success) {
-        let m = "Added " + res.added + " appointment" + (res.added !== 1 ? "s" : "") + ".";
-        if (res.profilesCreated > 0) m += " Created " + res.profilesCreated + " new client profile" + (res.profilesCreated !== 1 ? "s" : "") + ".";
-        if (res.errors && res.errors.length) m += " Skipped: " + res.errors.join(" ");
-        setMsg(m);
-        setRows([blank(), blank(), blank()]);
-      } else {
-        setMsg((res && res.error) ? res.error : "Could not add the appointments.");
-      }
-    }).catch(() => {
-      setBusy(false);
-      setMsg("Couldn't reach the server. Try again.");
-    });
-  };
-
-  return (
-    <div>
-      <h1 className="page-title">Backfill past appointments</h1>
-      <p className="page-sub">Enter appointments you've already had (e.g. January–February) in bulk. These write straight to your bookings — no calendar events are created, so your calendar stays clean.</p>
-
-      {msg && (
-        <div style={{background: "var(--ok-bg)", color: "var(--ok)", borderRadius: 8, padding: "10px 14px", marginBottom: 16, fontSize: 13}}>
-          {msg}
-        </div>
-      )}
-
-      <div className="card">
-        {rows.map((r, i) => (
-          <div key={i} style={{borderBottom: "1px solid var(--grey-light)", paddingBottom: 12, marginBottom: 12}}>
-            <div style={{display: "flex", gap: 8, flexWrap: "wrap", alignItems: "flex-end"}}>
-              <div style={{flex: "1 1 130px"}}>
-                <label className="form-label">Date</label>
-                <input className="form-input" type="date" value={r.date} onChange={e => setField(i, "date", e.target.value)} />
-              </div>
-              <div style={{flex: "0 1 100px"}}>
-                <label className="form-label">Time</label>
-                <input className="form-input" type="time" value={r.time} onChange={e => setField(i, "time", e.target.value)} />
-              </div>
-              <div style={{flex: "1 1 150px"}}>
-                <label className="form-label">Client name</label>
-                <input className="form-input" value={r.clientName} onChange={e => setField(i, "clientName", e.target.value)} placeholder="Client" />
-              </div>
-              <div style={{flex: "1 1 130px"}}>
-                <label className="form-label">Phone</label>
-                <input className="form-input" value={r.phone} onChange={e => setField(i, "phone", e.target.value)} placeholder="optional" />
-              </div>
-              <div style={{flex: "1 1 160px"}}>
-                <label className="form-label">Service</label>
-                <select className="form-select" onChange={e => pickPackage(i, e.target.value)} value={packages.find(p => p.name === r.service) ? packages.find(p => p.name === r.service).id : ""}>
-                  <option value="">— pick or type —</option>
-                  {packages.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
-                </select>
-                <input className="form-input" style={{marginTop: 4}} value={r.service} onChange={e => setField(i, "service", e.target.value)} placeholder="or type a service" />
-              </div>
-              <div style={{flex: "0 1 110px"}}>
-                <label className="form-label">Price (TND)</label>
-                <input className="form-input" type="number" value={r.basePrice} onChange={e => setField(i, "basePrice", e.target.value)} placeholder="0" />
-              </div>
-              <div style={{flex: "0 1 120px"}}>
-                <label className="form-label">Location</label>
-                <input className="form-input" value={r.location} onChange={e => setField(i, "location", e.target.value)} placeholder="Sousse" />
-              </div>
-              <div style={{flex: "0 1 120px"}}>
-                <label className="form-label">Staff</label>
-                <select className="form-select" value={r.staff} onChange={e => setField(i, "staff", e.target.value)}>
-                  <option value="">{currentStaff ? currentStaff.name : "Me"}</option>
-                  {staffList.map(s => <option key={s.name} value={s.name}>{s.name}</option>)}
-                </select>
-              </div>
-              {rows.length > 1 && <button className="btn-remove-row" onClick={() => removeRow(i)}>×</button>}
-            </div>
-            <input className="form-input" style={{marginTop: 6}} value={r.notes} onChange={e => setField(i, "notes", e.target.value)} placeholder="Notes (optional)" />
-          </div>
-        ))}
-
-        <button className="add-row-btn" onClick={addRow}>+ Add another appointment</button>
-
-        <div style={{marginTop: 16}}>
-          <label style={{display: "flex", alignItems: "center", gap: 8, fontSize: 13, marginBottom: 10, cursor: "pointer"}}>
-            <input type="checkbox" checked={makeProfiles} onChange={e => setMakeProfiles(e.target.checked)} />
-            Also create client profiles for names not already in my client list
-          </label>
-          <button className="btn-confirm" disabled={busy || filled.length === 0} onClick={submit}>
-            {busy ? "Adding..." : "Add " + filled.length + " appointment" + (filled.length !== 1 ? "s" : "")}
-          </button>
-          <p style={{fontSize: 11, color: "var(--grey)", marginTop: 6}}>
-            Rows need at least a date and a client name. Price goes into Base Price (the taxable amount used by invoices and reports).
-          </p>
-        </div>
-      </div>
-    </div>
-  );
-}
-
 // Consolidated Invoices screen — one front door for the three invoice paths
 // that used to be separate nav items. The per-client invoice still lives inside
 // each client's profile; this hub covers the two standalone paths plus a
@@ -4302,9 +3985,6 @@ function Dashboard({ staff, pin, onLogout }) {
         <div className={"nav-item" + (view === "clients" ? " active" : "")} onClick={() => setView("clients")}>
           Clients
         </div>
-        <div className={"nav-item" + (view === "onboard" ? " active" : "")} onClick={() => setView("onboard")}>
-          Onboard client
-        </div>
         <div className={"nav-item" + (view === "groups" ? " active" : "")} onClick={() => setView("groups")}>
           Group classes
         </div>
@@ -4319,31 +3999,18 @@ function Dashboard({ staff, pin, onLogout }) {
           </div>
         )}
 
-        {staff.role === "owner" && (
-          <React.Fragment>
-            <div className="nav-section">Setup</div>
-            <div className={"nav-item" + (view === "backfill" ? " active" : "")} onClick={() => setView("backfill")}>
-              Backfill past appointments
-            </div>
-          </React.Fragment>
-        )}
-
         <div className="nav-spacer"></div>
         <div className="logout-link" onClick={onLogout}>Sign out</div>
       </div>
       <div className="main">
         {!data && <div className="loading">Loading dashboard...</div>}
         {data && view === "today" && <TodayView pin={pin} data={data} onRefresh={loadData} />}
-        {data && view === "onboard" && <OnboardingView pin={pin} packages={packages} staffList={staffList} currentStaff={staff} />}
         {data && view === "calendar" && <CalendarView pin={pin} currentStaff={staff} />}
         {data && view === "groups" && <GroupClassesView pin={pin} currentStaff={staff} />}
         {data && view === "messages" && <MessagesView pin={pin} />}
         {data && view === "clients" && <ClientsView pin={pin} currentStaff={staff} />}
         {data && view === "invoice" && <InvoicesHub pin={pin} />}
         {data && view === "reports" && staff.role === "owner" && <ReportsHub pin={pin} />}
-        {data && view === "backfill" && staff.role === "owner" && (
-          <BackfillView pin={pin} packages={packages} staffList={staffList} currentStaff={staff} />
-        )}
       </div>
     </div>
   );
