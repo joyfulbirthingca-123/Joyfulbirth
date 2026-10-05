@@ -105,7 +105,7 @@ const PACKAGES = [
 // ───────────────────────── ONE-TIME SETUP ─────────────────────────
 
 function setupDashboardSheets() {
-  const ss = SpreadsheetApp.openById(DASH_SHEET_ID);
+  const ss = getDashSS();
 
   // Staff sheet
   let staffSheet = ss.getSheetByName('Staff');
@@ -402,25 +402,78 @@ function doGet(e) {
 
 // ───────────────────────── AUTH ─────────────────────────
 
-function getStaffByPin(pin) {
-  const ss = SpreadsheetApp.openById(DASH_SHEET_ID);
-  const sheet = ss.getSheetByName('Staff');
+// One spreadsheet handle per request. Opening the spreadsheet is slow, and a
+// single request used to open it several times (PIN check, then each sheet).
+let _dashSS = null;
+function getDashSS() {
+  if (!_dashSS) _dashSS = SpreadsheetApp.openById(DASH_SHEET_ID);
+  return _dashSS;
+}
+
+// The Staff tab changes rarely, but every request re-read it to check the PIN.
+// Keep the table in the script cache for 2 minutes. A PIN that isn't in the
+// cached table re-reads the tab once, so a newly added staff PIN works at once.
+// Trade-off: a staff member switched to Active=FALSE can still sign in for up
+// to 2 minutes (until the cached copy expires).
+const STAFF_CACHE_KEY = 'staffTable_v1';
+const STAFF_CACHE_SECONDS = 120;
+
+function readStaffTable() {
+  const sheet = getDashSS().getSheetByName('Staff');
   const rows = sheet.getDataRange().getValues();
   const headers = rows[0];
-
+  const iPin = headers.indexOf('PIN');
+  const iActive = headers.indexOf('Active');
+  const iName = headers.indexOf('Name');
+  const iRole = headers.indexOf('Role');
+  const iLoc = headers.indexOf('Location');
+  const table = [];
   for (let i = 1; i < rows.length; i++) {
-    const row = rows[i];
-    if (String(row[headers.indexOf('PIN')]).trim() === String(pin).trim()) {
-      const active = row[headers.indexOf('Active')];
-      if (String(active).toUpperCase() !== 'TRUE') continue;
-      return {
-        name: row[headers.indexOf('Name')],
-        role: row[headers.indexOf('Role')],
-        location: row[headers.indexOf('Location')]
-      };
+    table.push({
+      pin: String(rows[i][iPin]).trim(),
+      active: String(rows[i][iActive]).toUpperCase() === 'TRUE',
+      name: rows[i][iName],
+      role: rows[i][iRole],
+      location: rows[i][iLoc]
+    });
+  }
+  return table;
+}
+
+function findStaffInTable(table, pin) {
+  const want = String(pin).trim();
+  for (let i = 0; i < table.length; i++) {
+    if (table[i].pin === want && table[i].active) {
+      return { name: table[i].name, role: table[i].role, location: table[i].location };
     }
   }
   return null;
+}
+
+function getStaffByPin(pin) {
+  const cache = CacheService.getScriptCache();
+  let table = null;
+  try {
+    const raw = cache.get(STAFF_CACHE_KEY);
+    if (raw) table = JSON.parse(raw);
+  } catch (e) { table = null; }
+
+  if (table) {
+    const hit = findStaffInTable(table, pin);
+    if (hit) return hit;
+    // Not in the cached copy: it may be a brand-new PIN, so fall through and re-read.
+  }
+
+  table = readStaffTable();
+  try { cache.put(STAFF_CACHE_KEY, JSON.stringify(table), STAFF_CACHE_SECONDS); } catch (e) {}
+  return findStaffInTable(table, pin);
+}
+
+// Optional: add a time-driven trigger (Triggers page → Add trigger → keepWarm →
+// Time-driven → every 5 minutes) so the script is kept loaded and the first
+// click after a quiet spell is less likely to hit a slow cold start.
+function keepWarm() {
+  getStaffByPin('__keep_warm__');
 }
 
 function handleLogin(pin) {
@@ -432,7 +485,7 @@ function handleLogin(pin) {
 // ───────────────────────── HELPERS ─────────────────────────
 
 function getBookingsData() {
-  const ss = SpreadsheetApp.openById(DASH_SHEET_ID);
+  const ss = getDashSS();
   const sheet = ss.getSheetByName('Bookings');
   const rows = sheet.getDataRange().getValues();
   const headers = rows[0];
@@ -834,7 +887,7 @@ function mergeClients(params) {
   mergeIds = mergeIds.filter(function (id) { return id && id !== primaryId; });
   if (!primaryId || !mergeIds.length) return { success: false, error: 'Pick a primary profile and at least one to merge into it.' };
 
-  const ss = SpreadsheetApp.openById(DASH_SHEET_ID);
+  const ss = getDashSS();
   const moved = { appointments: 0, charges: 0, payments: 0, plan: 0 };
 
   // Re-point Client ID on every related sheet
@@ -915,7 +968,7 @@ function mergeClients(params) {
 // the Payments ledger, so the client's balance stays the single source of
 // truth — the plan only tracks the schedule and the invoice status.
 function getPaymentPlanSheet() {
-  const ss = SpreadsheetApp.openById(DASH_SHEET_ID);
+  const ss = getDashSS();
   let sheet = ss.getSheetByName('Payment Plan');
   if (!sheet) {
     sheet = ss.insertSheet('Payment Plan');
@@ -1124,7 +1177,7 @@ function bulkAddAppointments(params) {
   try { rows = JSON.parse(params.rows || '[]'); } catch (e) { rows = []; }
   if (!rows.length) return { success: false, error: 'No appointments to add.' };
 
-  const ss = SpreadsheetApp.openById(DASH_SHEET_ID);
+  const ss = getDashSS();
   const sheet = ss.getSheetByName('Bookings');
   if (!sheet) return { success: false, error: 'Bookings sheet not found' };
   const headers = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0];
@@ -1192,7 +1245,7 @@ function createAppointment(params) {
   const staff = getStaffByPin(params.pin);
   if (!staff) return { success: false, error: 'Invalid PIN' };
 
-  const ss = SpreadsheetApp.openById(DASH_SHEET_ID);
+  const ss = getDashSS();
   const sheet = ss.getSheetByName('Bookings');
   if (!sheet) return { success: false, error: 'Bookings sheet not found' };
 
@@ -1289,7 +1342,7 @@ function createAppointment(params) {
 // ───────────────────────── CBE PROGRESS ─────────────────────────
 
 function getCbeSheet() {
-  const ss = SpreadsheetApp.openById(DASH_SHEET_ID);
+  const ss = getDashSS();
   return ss.getSheetByName('CBE Progress');
 }
 
@@ -1409,12 +1462,12 @@ function getMonthlyStats(pin, month, year) {
 // ───────────────────────── CLIENTS (package-based profiles) ─────────────────────────
 
 function getClientsSheet() {
-  const ss = SpreadsheetApp.openById(DASH_SHEET_ID);
+  const ss = getDashSS();
   return ss.getSheetByName('Clients');
 }
 
 function getPaymentsSheet() {
-  const ss = SpreadsheetApp.openById(DASH_SHEET_ID);
+  const ss = getDashSS();
   return ss.getSheetByName('Payments');
 }
 
@@ -1492,7 +1545,7 @@ function getClients(pin) {
 // location dropdowns in the dashboard. Owner-level info (PINs) is never
 // included — only what the UI needs.
 function getStaffList() {
-  const ss = SpreadsheetApp.openById(DASH_SHEET_ID);
+  const ss = getDashSS();
   const sheet = ss.getSheetByName('Staff');
   const rows = sheet.getDataRange().getValues();
   const headers = rows[0];
@@ -1816,7 +1869,7 @@ function getClientLedger(pin, clientId) {
 // amount owed in that client's ledger. Stored in its own "Charges" sheet,
 // created on first use so no setup re-run is needed.
 function getChargesSheet() {
-  const ss = SpreadsheetApp.openById(DASH_SHEET_ID);
+  const ss = getDashSS();
   let sheet = ss.getSheetByName('Charges');
   if (!sheet) {
     sheet = ss.insertSheet('Charges');
@@ -1870,7 +1923,7 @@ function addCharge(params) {
 // working record for a client. Stored in its own "Appointments" sheet,
 // created on first use.
 function getAppointmentsSheet() {
-  const ss = SpreadsheetApp.openById(DASH_SHEET_ID);
+  const ss = getDashSS();
   let sheet = ss.getSheetByName('Appointments');
   if (!sheet) {
     sheet = ss.insertSheet('Appointments');
@@ -1909,7 +1962,7 @@ function getAppointments(pin, clientId) {
 // client still pays their own fee on their own profile — this only handles
 // scheduling, not billing.
 function getGroupClassesSheet() {
-  const ss = SpreadsheetApp.openById(DASH_SHEET_ID);
+  const ss = getDashSS();
   let sheet = ss.getSheetByName('Group Classes');
   if (!sheet) {
     sheet = ss.insertSheet('Group Classes');
@@ -2204,7 +2257,7 @@ function deleteAppointment(params) {
 function r3(n) { return Math.round((parseFloat(n) || 0) * 1000) / 1000; }
 
 function getExpensesSheet() {
-  const ss = SpreadsheetApp.openById(DASH_SHEET_ID);
+  const ss = getDashSS();
   let sheet = ss.getSheetByName('Expenses');
   if (!sheet) {
     sheet = ss.insertSheet('Expenses');
@@ -2981,7 +3034,7 @@ function mapServiceToCategory(serviceName, packageLabel) {
 // and a record of every invoice generated (so numbering never repeats or
 // resets, even across sessions).
 function getInvoicesSheet() {
-  const ss = SpreadsheetApp.openById(DASH_SHEET_ID);
+  const ss = getDashSS();
   let sheet = ss.getSheetByName('Invoices');
   if (!sheet) {
     sheet = ss.insertSheet('Invoices');
