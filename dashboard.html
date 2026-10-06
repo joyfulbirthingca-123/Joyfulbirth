@@ -649,6 +649,7 @@ const LOGO_BASE64 = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAMgAAADICAIAA
 //    is ever shown after a change. (Memory only — never stored in the browser.)
 const READ_ACTION = /^(get|find|lookup|login)|^generate\w*Data$/;
 const READ_FRESH_MS = 20000; // a read this recent is reused without re-asking
+const API_TIMEOUT_MS = 90000; // stop waiting after 90s (Apps Script's own limit is 6 min)
 let cacheVersion = 0;
 let readCache = {};
 const readInflight = {};
@@ -659,10 +660,14 @@ function apiCall(params) {
   const isRead = READ_ACTION.test(params.action);
   if (!isRead) invalidateReads(); // a write is starting: nothing cached is safe now
   const url = API_URL + "?" + new URLSearchParams(params).toString();
-  return fetch(url).then(r => r.json()).then(res => {
+  // Give up on a request that never answers (Google occasionally stalls), so
+  // screens can show an error + Retry instead of "Loading..." forever.
+  const ctl = typeof AbortController !== "undefined" ? new AbortController() : null;
+  const timer = ctl ? setTimeout(() => ctl.abort(), API_TIMEOUT_MS) : null;
+  return fetch(url, ctl ? { signal: ctl.signal } : undefined).then(r => r.json()).then(res => {
     if (!isRead) invalidateReads(); // ...and again once it has finished
     return res;
-  });
+  }).finally(() => { if (timer) clearTimeout(timer); });
 }
 
 // onData(res, isFresh) may be called twice: first with the remembered answer
@@ -2348,8 +2353,14 @@ function ImportClientsView({ pin, onClose, onImported }) {
   const [debug, setDebug] = useState(null);
   const [errorMsg, setErrorMsg] = useState("");
 
+  const [reloadTick, setReloadTick] = useState(0);
+
   useEffect(() => {
+    let cancelled = false;
+    setLoading(true);
+    setErrorMsg("");
     apiCall({ action: "getImportCandidates", pin }).then(res => {
+      if (cancelled) return;
       if (res.success) {
         setCandidates(res.candidates);
         setPackages(res.packages);
@@ -2364,8 +2375,13 @@ function ImportClientsView({ pin, onClose, onImported }) {
         setErrorMsg(res.error || "Could not load candidates.");
       }
       setLoading(false);
+    }).catch(() => {
+      if (cancelled) return;
+      setErrorMsg("The scan took too long or the connection dropped.");
+      setLoading(false);
     });
-  }, [pin]);
+    return () => { cancelled = true; };
+  }, [pin, reloadTick]);
 
   const updateSelection = (phone, field, value) => {
     setSelections(prev => ({ ...prev, [phone]: { ...prev[phone], [field]: value } }));
@@ -2382,9 +2398,14 @@ function ImportClientsView({ pin, onClose, onImported }) {
       }));
     if (approvedList.length === 0) return;
     setImporting(true);
+    setErrorMsg("");
     apiCall({ action: "importApprovedClients", pin, approvedList: JSON.stringify(approvedList) }).then(res => {
       setImporting(false);
       if (res.success) onImported(res.created);
+      else setErrorMsg(res.error || "The import didn't finish. Check your client list before trying again.");
+    }).catch(() => {
+      setImporting(false);
+      setErrorMsg("The connection dropped during the import. Check your client list before trying again, so nobody is added twice.");
     });
   };
 
@@ -2407,9 +2428,7 @@ function ImportClientsView({ pin, onClose, onImported }) {
         {loading && <div className="loading">Scanning bookings and fiches...</div>}
 
         {!loading && errorMsg && (
-          <div className="card empty-state" style={{color: "var(--magenta-dark)"}}>
-            Couldn't scan your data: {errorMsg}
-          </div>
+          <LoadError message={"Couldn't scan your data: " + errorMsg} onRetry={() => setReloadTick(t => t + 1)} />
         )}
 
         {!loading && !errorMsg && candidates && candidates.length === 0 && (
@@ -4044,16 +4063,28 @@ function Dashboard({ staff, pin, onLogout }) {
   // Warm up the other screens in the background while the user is on Today,
   // so Calendar / Messages / Group classes open instantly. Params must match
   // the screens' own requests exactly so they hit the same cache entry.
+  // Waits until the first screen has loaded, then fetches them ONE AT A TIME so
+  // the warm-up never competes with anything the user is actually waiting for.
+  const hasData = !!data;
   useEffect(() => {
-    const t = setTimeout(() => {
-      const now = new Date();
-      const noop = () => {};
-      apiRead({ action: "getCalendarAppointments", pin, month: now.getMonth() + 1, year: now.getFullYear() }, noop);
-      apiRead({ action: "getMessageQueue", pin }, noop);
-      apiRead({ action: "getGroupClasses", pin }, noop);
-    }, 1500);
-    return () => clearTimeout(t);
-  }, [pin]);
+    if (!hasData) return;
+    let cancelled = false;
+    const now = new Date();
+    const noop = () => {};
+    const steps = [
+      { action: "getCalendarAppointments", pin, month: now.getMonth() + 1, year: now.getFullYear() },
+      { action: "getMessageQueue", pin },
+      { action: "getGroupClasses", pin }
+    ];
+    (async () => {
+      await new Promise(r => setTimeout(r, 2500));
+      for (const p of steps) {
+        if (cancelled) return;
+        await apiRead(p, noop);
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [hasData, pin]);
 
   return (
     <div className="shell">
