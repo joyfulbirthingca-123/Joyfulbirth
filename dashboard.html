@@ -691,6 +691,15 @@ function apiRead(params, onData) {
   return readInflight[key].then(res => { onData(res, true); return res; });
 }
 
+// Sign-in can return the first screen's data in the same trip (login with
+// bootstrap=1). Park it where apiRead() will find it so Today opens without
+// asking the server again. Older backends simply don't send it — harmless.
+function seedFromLogin(pin, res) {
+  if (res && res.dashboard && res.dashboard.success) {
+    readCache[JSON.stringify({ action: "getDashboard", pin })] = { res: res.dashboard, t: Date.now() };
+  }
+}
+
 // Shown whenever a screen could not load, so a failed request never looks like
 // "you have no appointments/clients". Nothing is lost — it is only the connection.
 function LoadError({ message, onRetry }) {
@@ -901,10 +910,11 @@ function LockScreen({ onLogin }) {
     if (!pin) return;
     setLoading(true);
     setError("");
-    apiCall({ action: "login", pin }).then(res => {
+    apiCall({ action: "login", pin, bootstrap: "1" }).then(res => {
       setLoading(false);
       if (res.success) {
         localStorage.setItem("jbs_pin", pin);
+        seedFromLogin(pin, res);
         onLogin(res.staff, pin);
       } else {
         setError(res.error || "PIN not recognized");
@@ -4387,8 +4397,9 @@ function App() {
   useEffect(() => {
     const savedPin = localStorage.getItem("jbs_pin");
     if (savedPin) {
-      apiCall({ action: "login", pin: savedPin }).then(res => {
+      apiCall({ action: "login", pin: savedPin, bootstrap: "1" }).then(res => {
         if (res.success) {
+          seedFromLogin(savedPin, res);
           setStaff(res.staff);
           setPin(savedPin);
         } else {
