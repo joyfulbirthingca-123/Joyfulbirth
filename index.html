@@ -405,6 +405,13 @@ function App(){
   const[rcMap,   setRcMap]  =useState({});
   const[serverBooked,setServerBooked]=useState([]);// booked times fetched from server
   const[slotsLoading,setSlotsLoading]=useState(false);// tracks which returningClient services have toggle on
+  // Admin key: protects the full booking list. Kept only for this browser tab (sessionStorage),
+  // never in the page's code. The public pages never send it.
+  const[adminKey,setAdminKey]=useState(function(){try{return sessionStorage.getItem("jbs_ak")||"";}catch(e){return "";}});
+  const[adminKeyErr,setAdminKeyErr]=useState("");
+  const[keyInput,setKeyInput]=useState("");
+  const[booksRestricted,setBooksRestricted]=useState(false); // true = we only hold the public (pump-only) list
+  const[booksFailed,setBooksFailed]=useState(false);         // true = last load failed; don't auto-retry in a loop
   const[submitting,setSubmitting]=useState(false);   // true while the booking is being saved
   const[bookingError,setBookingError]=useState("");  // shown if saving could not be confirmed
 
@@ -455,44 +462,63 @@ function App(){
   const saveAvail=v=>{setAvail(v);sto.set("jbs_av",v);};
   const saveBooks=v=>{setBooks(v);};
 
-  // Fetch all bookings from Google Sheets (cloud source of truth)
-  var fetchAllBookings=function(force){
+  var rememberKey=function(k){
+    setAdminKey(k);
+    try{if(k)sessionStorage.setItem("jbs_ak",k);else sessionStorage.removeItem("jbs_ak");}catch(e){}
+  };
+
+  // Fetch bookings from Google Sheets (cloud source of truth).
+  //  - Public pages call fetchAllBookings(force) -> the server returns ONLY pump availability.
+  //  - The admin screen calls fetchAllBookings(force,true) -> sends the admin key for the full list.
+  var fetchAllBookings=function(force,useKey){
     if((booksLoaded&&!force)||booksLoading)return;
     setBooksLoading(true);
-    // Use no-cors first attempt, fall back gracefully
-    fetch(HARDCODED_SCRIPT_URL+"?action=bookings",{method:"GET",cache:"no-cache"})
+    setBooksFailed(false);
+    var url=HARDCODED_SCRIPT_URL+"?action=bookings"+(useKey&&adminKey?"&key="+encodeURIComponent(adminKey):"");
+    var apply=function(d){
+      if(d&&d.error&&useKey){
+        // The server refused the key: forget it and let the admin try again.
+        rememberKey("");
+        setAdminKeyErr(d.error);
+        setBooksRestricted(true);
+      }else if(d&&d.bookings){
+        setBooks(d.bookings);
+        setBooksLoaded(true);
+        setBooksRestricted(!!d.restricted);
+        if(useKey)setAdminKeyErr("");
+      }
+      setBooksLoading(false);
+    };
+    fetch(url,{method:"GET",cache:"no-cache"})
       .then(function(r){
         if(!r.ok&&r.status!==0)throw new Error("HTTP "+r.status);
         return r.json();
       })
-      .then(function(d){
-        if(d&&d.bookings){
-          setBooks(d.bookings);
-          setBooksLoaded(true);
-        }
-        setBooksLoading(false);
-      })
+      .then(apply)
       .catch(function(err){
         console.warn("fetchAllBookings failed:",err);
-        // Try again without mode restriction
-        fetch(HARDCODED_SCRIPT_URL+"?action=bookings")
+        // One more try, then stop (booksFailed prevents an endless retry loop)
+        fetch(url)
           .then(function(r){return r.json();})
-          .then(function(d){
-            if(d&&d.bookings){
-              setBooks(d.bookings);
-              setBooksLoaded(true);
-            }
-            setBooksLoading(false);
-          })
-          .catch(function(){setBooksLoading(false);});
+          .then(apply)
+          .catch(function(){setBooksLoading(false);setBooksFailed(true);});
       });
   };
 
-  // Cancel a booking - calls server then refreshes
+  // Cancel a booking (admin key required) - calls server, then refreshes the full list
   var cancelBookCloud=function(id){
-    fetch(HARDCODED_SCRIPT_URL+"?action=cancel&id="+id,{method:"GET",mode:"cors",cache:"no-cache"})
+    fetch(HARDCODED_SCRIPT_URL+"?action=cancel&id="+encodeURIComponent(id)+"&key="+encodeURIComponent(adminKey),{method:"GET",mode:"cors",cache:"no-cache"})
       .then(function(r){return r.json();})
-      .then(function(){fetchAllBookings(true);showToast("Booking cancelled");})
+      .then(function(d){
+        if(d&&d.success){
+          fetchAllBookings(true,true);
+          showToast("Booking cancelled");
+        }else{
+          // Don't claim success: the server said no (wrong/missing key, locked, ...)
+          if(d&&/key|attempt/i.test(d.error||"")){rememberKey("");setAdminKeyErr(d.error);}
+          showToast((d&&d.error)||"Could not cancel - try again");
+        }
+      })
       .catch(function(){showToast("Could not cancel - try again");});
   };
   const saveSett =v=>{setSett(v); sto.set("jbs_st",v);};
@@ -671,7 +697,7 @@ function App(){
   // -- HOME ------------------------------------------------------
   if(view==="home"){
     // Fetch cloud bookings on home page so pump availability is accurate
-    if(!booksLoaded&&!booksLoading) fetchAllBookings(false);
+    if(!booksLoaded&&!booksLoading&&!booksFailed) fetchAllBookings(false);
     return<div style={S.pg}>
       <Toast/><LangBar/><Hdr/>
       <p style={S.h2}>{tr.bookTitle}</p>
@@ -943,13 +969,27 @@ function App(){
       {pwErr&&<p style={{color:C.err,fontSize:13,margin:"0 0 0.75rem",display:"flex",alignItems:"center",gap:4}}><IcoWrn size={13}/> {pwErr}</p>}
       <button style={S.bp} onClick={()=>{if(pw===sett.adminPassword){setView("admin");setPwErr("");}else setPwErr("Incorrect password.");}}>Sign in <IcoArR size={14}/></button>
     </div>
-    <p style={{fontSize:12,color:C.t3,textAlign:"center",marginTop:"1rem"}}>Default password: <strong>admin123</strong></p>
+  </div>;
+
+  // -- ADMIN KEY (the real lock on client details) -----------------
+  if(view==="admin"&&!adminKey)return<div style={S.pg}>
+    <div style={{display:"flex",alignItems:"center",gap:"0.5rem",marginBottom:"1rem"}}>
+      <button style={Object.assign({},S.bt,{padding:"4px 8px"})} onClick={()=>setView("home")}><IcoArL size={16}/></button>
+    </div>
+    <p style={Object.assign({},S.h2,{display:"flex",alignItems:"center",gap:8})}><IcoLock size={16}/>Admin key</p>
+    <div style={Object.assign({},S.cd,{maxWidth:360})}>
+      <p style={{fontSize:13,color:C.t2,margin:"0 0 0.75rem"}}>Client details are protected by a separate admin key. Enter it to view bookings.</p>
+      <label style={S.lb}>Admin key</label>
+      <input type="password" style={Object.assign({},S.ip,{marginBottom:"0.75rem"})} placeholder="Enter admin key" value={keyInput} onChange={e=>setKeyInput(e.target.value)} onKeyDown={e=>{if(e.key==="Enter"&&keyInput){rememberKey(keyInput.trim());setKeyInput("");setAdminKeyErr("");}}}/>
+      {adminKeyErr&&<p role="alert" style={{color:C.err,fontSize:13,margin:"0 0 0.75rem",display:"flex",alignItems:"center",gap:4}}><IcoWrn size={13}/> {adminKeyErr}</p>}
+      <button style={Object.assign({},S.bp,{opacity:keyInput?1:0.4})} disabled={!keyInput} onClick={()=>{rememberKey(keyInput.trim());setKeyInput("");setAdminKeyErr("");}}>Unlock <IcoArR size={14}/></button>
+    </div>
   </div>;
 
   // -- ADMIN ------------------------------------------------------
   if(view==="admin"){
-    // Load bookings from cloud when admin opens
-    if(!booksLoaded&&!booksLoading) fetchAllBookings(false);
+    // Load the FULL list (needs the admin key). Also reload if we only hold the public list.
+    if((!booksLoaded||booksRestricted)&&!booksLoading&&!booksFailed&&adminKey) fetchAllBookings(true,true);
     var today2=todayStr();
     var DAYS2=["Sunday","Monday","Tuesday","Wednesday","Thursday","Friday","Saturday"];
     var fmtAD=s=>{if(!s)return"";var p=s.split("-").map(Number);var D=["Sun","Mon","Tue","Wed","Thu","Fri","Sat"],M=["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];return D[new Date(p[0],p[1]-1,p[2]).getDay()]+" "+M[p[1]-1]+" "+p[2]+", "+p[0];};
@@ -1011,7 +1051,10 @@ function App(){
           <div style={{width:14,height:14,border:"2px solid "+C.accent,borderTopColor:"transparent",borderRadius:"50%",animation:"spin 0.8s linear infinite"}}/>
           Loading bookings from cloud...
         </div>}
-        {!booksLoading&&booksLoaded&&<div style={{fontSize:11,color:C.ok,marginBottom:"0.75rem",display:"flex",alignItems:"center",gap:4}}>OK Live data from Google Sheets <button style={{fontSize:11,color:C.accent,background:"transparent",border:"none",cursor:"pointer",textDecoration:"underline",padding:0}} onClick={()=>fetchAllBookings(true)}>Refresh</button></div>}
+        {!booksLoading&&booksFailed&&<div role="alert" style={{display:"flex",alignItems:"center",gap:8,padding:"0.75rem",background:C.errBg,borderRadius:8,marginBottom:"0.75rem",fontSize:13,color:C.err}}>
+          Couldn't load the bookings (slow or dropped connection). <button style={{fontSize:13,color:C.err,background:"transparent",border:"none",cursor:"pointer",textDecoration:"underline",padding:0}} onClick={()=>fetchAllBookings(true,true)}>Retry</button>
+        </div>}
+        {!booksLoading&&booksLoaded&&!booksRestricted&&<div style={{fontSize:11,color:C.ok,marginBottom:"0.75rem",display:"flex",alignItems:"center",gap:4}}>OK Live data from Google Sheets <button style={{fontSize:11,color:C.accent,background:"transparent",border:"none",cursor:"pointer",textDecoration:"underline",padding:0}} onClick={()=>fetchAllBookings(true,true)}>Refresh</button></div>}
         <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(130px,1fr))",gap:10,marginBottom:"1.25rem"}}>
           {[{l:"Upcoming",v:upcoming2.length,bg:C.aBg,c:C.aDk},{l:"Past",v:past2.length,bg:C.okBg,c:C.ok},{l:"Cancelled",v:cancelled2.length,bg:C.errBg,c:C.err},{l:"Total",v:books.length,bg:C.inp,c:C.t2}].map(x=><div key={x.l} style={{background:x.bg,borderRadius:10,padding:"0.9rem",textAlign:"center"}}><p style={{margin:"0 0 4px",fontSize:12,color:x.c,opacity:0.7}}>{x.l}</p><p style={{margin:0,fontSize:26,fontWeight:600,color:x.c}}>{x.v}</p></div>)}
         </div>
