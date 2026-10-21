@@ -4874,6 +4874,9 @@ function Dashboard({ staff, pin, onLogout }) {
         <div className={"nav-item" + (view === "invoice" ? " active" : "")} onClick={() => setView("invoice")}>
           Invoices
         </div>
+        <div className={"nav-item" + (view === "caisse" ? " active" : "")} onClick={() => setView("caisse")}>
+          Caisse
+        </div>
         {staff.role === "owner" && (
           <div className={"nav-item" + (view === "reports" ? " active" : "")} onClick={() => setView("reports")}>
             Reports
@@ -4892,12 +4895,191 @@ function Dashboard({ staff, pin, onLogout }) {
         {data && view === "messages" && <MessagesView pin={pin} />}
         {data && view === "clients" && <ClientsView pin={pin} currentStaff={staff} autoOpen={clientsOpen} onAutoOpened={() => setClientsOpen(null)} />}
         {data && view === "invoice" && <InvoicesHub pin={pin} />}
+        {data && view === "caisse" && <CaisseView pin={pin} staff={staff} />}
         {data && view === "reports" && staff.role === "owner" && <ReportsHub pin={pin} />}
       </div>
     </div>
   );
 }
 
+
+// The cash book: how much cash should be in the drawer, per city.
+function CaisseView({ pin, staff }) {
+  const isOwner = staff.role === "owner";
+  const cities = (isOwner || staff.location === "All") ? ["Sousse", "Tunis"] : [staff.location === "Tunis" ? "Tunis" : "Sousse"];
+  const todayStr = new Date().toISOString().split("T")[0];
+  const [city, setCity] = useState(cities[0]);
+  const [data, setData] = useState(null);
+  const [err, setErr] = useState("");
+  const [panel, setPanel] = useState("");          // "in" | "out" | "count" | "start"
+  const [msg, setMsg] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [fDate, setFDate] = useState(todayStr);
+  const [fAmount, setFAmount] = useState("");
+  const [fCat, setFCat] = useState("Other");
+  const [fDesc, setFDesc] = useState("");
+  const [fNote, setFNote] = useState("");
+
+  const load = () => {
+    setErr("");
+    apiCall({ action: "getCaisse", pin, city }).then(res => {
+      if (res.success) setData(res); else setErr(res.error || "Couldn't load the caisse.");
+    }).catch(() => setErr("Couldn't reach the server. Please try again."));
+  };
+  useEffect(() => { setData(null); setPanel(""); setMsg(""); load(); }, [city]);
+
+  const open = (p) => { setPanel(p); setMsg(""); setFAmount(""); setFDesc(""); setFNote(""); setFDate(todayStr); setFCat(p === "out" ? "Supplies" : "Other"); };
+  const done = (text) => { setBusy(false); setPanel(""); setMsg(text); load(); };
+  const fail = (e) => { setBusy(false); setMsg(typeof e === "string" ? e : "Couldn't reach the server. Check the list before pressing again."); };
+
+  const start = () => {
+    setBusy(true); setMsg("");
+    apiCall({ action: "setCaisseOpening", pin, city, date: fDate, amount: fAmount }).then(res => res.success ? done("The " + city + " caisse is set to " + fAmount + " TND from " + fDate + ".") : fail(res.error || "Could not save.")).catch(() => fail());
+  };
+  const addLine = (type) => {
+    setBusy(true); setMsg("");
+    apiCall({ action: "addCaisseEntry", pin, city, type, date: fDate, amount: fAmount, category: fCat, description: fDesc }).then(res => res.success ? done("Saved.") : fail(res.error || "Could not save.")).catch(() => fail());
+  };
+  const count = (adjust) => {
+    setBusy(true); setMsg("");
+    apiCall({ action: "countCaisse", pin, city, counted: fAmount, note: fNote, adjust: adjust ? "1" : "" }).then(res => {
+      if (!res.success) { fail(res.error || "Could not save."); return; }
+      const d = res.difference;
+      done(d === 0 ? "Counted " + res.counted + " TND: exactly what was expected." : "Counted " + res.counted + " TND; expected " + res.expected + " TND (" + (d > 0 ? "+" : "") + d + " TND)." + (res.adjusted ? " The caisse now matches your count." : ""));
+    }).catch(() => fail());
+  };
+  const remove = (id) => {
+    if (!window.confirm("Remove this line from the caisse?")) return;
+    apiCall({ action: "deleteCaisseEntry", pin, entryId: id }).then(res => { if (res.success) load(); else setMsg(res.error || "Could not remove."); }).catch(() => setMsg("Couldn't reach the server."));
+  };
+
+  const fmt = (n) => (Math.round(n * 1000) / 1000).toLocaleString("en-US", { minimumFractionDigits: 0, maximumFractionDigits: 3 });
+  const amountOk = fAmount !== "" && Number(fAmount) >= 0;
+  const field = { marginTop: 6, width: "100%" };
+
+  return (
+    <div>
+      <h2 className="hub-view-title">Caisse</h2>
+      <p className="page-sub">The cash that should be in the drawer. Cash payments from clients and cash expenses are added automatically; add anything else yourself.</p>
+
+      {cities.length > 1 && (
+        <div style={{display: "flex", border: "1.5px solid var(--grey-light)", borderRadius: 8, overflow: "hidden", width: "fit-content", marginBottom: 14}}>
+          {cities.map(c => (
+            <button key={c} onClick={() => setCity(c)} style={{padding: "8px 18px", border: "none", cursor: "pointer", fontSize: 13, fontFamily: "inherit", background: city === c ? "var(--magenta)" : "transparent", color: city === c ? "#fff" : "var(--grey)"}}>{c}</button>
+          ))}
+        </div>
+      )}
+
+      {err && <LoadError message={err} onRetry={load} />}
+      {!data && !err && <div className="loading">Loading the {city} caisse...</div>}
+      {msg && <div role="status" style={{background: "var(--ok-bg)", color: "var(--ok)", borderRadius: 8, padding: "8px 12px", marginBottom: 12, fontSize: 13}}>{msg}</div>}
+
+      {data && !data.started && (
+        <div className="card">
+          <div className="component-label">Start the {city} caisse</div>
+          {isOwner ? (
+            <React.Fragment>
+              <p style={{fontSize: 13, color: "var(--grey)", margin: "4px 0 8px"}}>Count the cash in the {city} drawer now and enter it. From that day on, every cash payment and cash expense is added to it automatically. Money from before that day is not counted.</p>
+              <div className="payment-form-row">
+                <input className="form-input" type="date" max={todayStr} value={fDate} onChange={e => setFDate(e.target.value)} />
+                <input className="form-input" type="number" min="0" step="0.001" placeholder="Cash counted (TND)" value={fAmount} onChange={e => setFAmount(e.target.value)} />
+              </div>
+              <button className="btn-confirm" style={{marginTop: 10}} disabled={busy || !amountOk} onClick={start}>{busy ? "Saving..." : "Start the " + city + " caisse"}</button>
+            </React.Fragment>
+          ) : <p style={{fontSize: 13, color: "var(--grey)"}}>The {city} caisse hasn't been started yet. Ask the owner to count the drawer and start it.</p>}
+        </div>
+      )}
+
+      {data && data.started && (
+        <React.Fragment>
+          <div className="card" style={{textAlign: "center"}}>
+            <div style={{fontSize: 12, color: "var(--grey)"}}>Cash that should be in the {city} drawer</div>
+            <div style={{fontSize: 36, fontWeight: 700, color: "var(--magenta-dark)", margin: "4px 0"}}>{fmt(data.balance)} TND</div>
+            <div style={{fontSize: 12, color: "var(--grey)"}}>
+              Started {data.startDate} with {fmt(data.opening)} TND · in {fmt(data.totals.in)} · out {fmt(data.totals.out)}
+              {data.lastCount && <span> · last count {data.lastCount.date}: {data.lastCount.difference === 0 ? "exact" : (data.lastCount.difference > 0 ? "+" : "") + data.lastCount.difference + " TND"}</span>}
+            </div>
+            <div style={{display: "flex", gap: 8, justifyContent: "center", flexWrap: "wrap", marginTop: 12}}>
+              <button className="btn-small" onClick={() => open("in")}>+ Cash in</button>
+              <button className="btn-small" onClick={() => open("out")}>− Cash out</button>
+              <button className="btn-small" onClick={() => open("count")}>Count the cash</button>
+              {isOwner && <button className="btn-small" style={{background: "var(--grey-light)", color: "var(--grey)"}} onClick={() => { open("start"); setFAmount(String(data.opening)); setFDate(data.startDate); }}>Change starting cash</button>}
+            </div>
+          </div>
+
+          {panel && (
+            <div className="card">
+              {(panel === "in" || panel === "out") && (
+                <React.Fragment>
+                  <div className="component-label">{panel === "in" ? "Cash in" : "Cash out"}</div>
+                  <p style={{fontSize: 12, color: "var(--grey)", margin: "2px 0 6px"}}>{panel === "in" ? "For example money from La Bulle des mamans, or cash taken out of the bank. Client payments are added by themselves when you record them." : "For example a bank deposit or pay to staff. Cash expenses entered in Reports are added by themselves."}</p>
+                  <div className="payment-form-row">
+                    <input className="form-input" type="date" max={todayStr} value={fDate} onChange={e => setFDate(e.target.value)} />
+                    <input className="form-input" type="number" min="0" step="0.001" placeholder="Amount (TND)" value={fAmount} onChange={e => setFAmount(e.target.value)} />
+                  </div>
+                  <select className="form-select" style={field} value={fCat} onChange={e => setFCat(e.target.value)}>
+                    {data.categories.map(c => <option key={c} value={c}>{c}</option>)}
+                  </select>
+                  <input className="form-input" style={field} placeholder="Note (optional)" value={fDesc} onChange={e => setFDesc(e.target.value)} />
+                  <button className="btn-confirm" style={{marginTop: 10}} disabled={busy || !(Number(fAmount) > 0)} onClick={() => addLine(panel)}>{busy ? "Saving..." : "Save"}</button>
+                </React.Fragment>
+              )}
+              {panel === "count" && (
+                <React.Fragment>
+                  <div className="component-label">Count the cash</div>
+                  <p style={{fontSize: 12, color: "var(--grey)", margin: "2px 0 6px"}}>Count what is really in the drawer and enter it. You'll see the difference from {fmt(data.balance)} TND.</p>
+                  <input className="form-input" type="number" min="0" step="0.001" style={field} placeholder="Cash counted (TND)" value={fAmount} onChange={e => setFAmount(e.target.value)} />
+                  <input className="form-input" style={field} placeholder="Note (optional)" value={fNote} onChange={e => setFNote(e.target.value)} />
+                  <div style={{display: "flex", gap: 8, flexWrap: "wrap", marginTop: 10}}>
+                    <button className="btn-confirm" disabled={busy || !amountOk} onClick={() => count(false)}>{busy ? "Saving..." : "Save the count"}</button>
+                    {isOwner && <button className="btn-small" disabled={busy || !amountOk} onClick={() => count(true)}>Save and make the caisse match</button>}
+                  </div>
+                </React.Fragment>
+              )}
+              {panel === "start" && (
+                <React.Fragment>
+                  <div className="component-label">Starting cash</div>
+                  <p style={{fontSize: 12, color: "var(--grey)", margin: "2px 0 6px"}}>Changing the date or amount changes the balance. Money from before the date is not counted.</p>
+                  <div className="payment-form-row">
+                    <input className="form-input" type="date" max={todayStr} value={fDate} onChange={e => setFDate(e.target.value)} />
+                    <input className="form-input" type="number" min="0" step="0.001" placeholder="Cash counted (TND)" value={fAmount} onChange={e => setFAmount(e.target.value)} />
+                  </div>
+                  <button className="btn-confirm" style={{marginTop: 10}} disabled={busy || !amountOk} onClick={start}>{busy ? "Saving..." : "Save"}</button>
+                </React.Fragment>
+              )}
+              <button className="btn-secondary" style={{marginTop: 8}} onClick={() => setPanel("")}>Cancel</button>
+            </div>
+          )}
+
+          {data.unclassifiedExpenses > 0 && (
+            <div style={{background: "#FFFBEB", border: "1px solid #F6E3A1", borderRadius: 8, padding: "8px 12px", fontSize: 12, color: "#92400E", marginBottom: 12}}>
+              {data.unclassifiedExpenses} expense{data.unclassifiedExpenses !== 1 ? "s have" : " has"} no payment method, so {data.unclassifiedExpenses !== 1 ? "they are" : "it is"} not in the caisse. If paid in cash, remove and re-enter {data.unclassifiedExpenses !== 1 ? "them" : "it"} with “Cash”.
+            </div>
+          )}
+
+          <div className="card">
+            <div className="component-label">Movements</div>
+            {[...data.entries].reverse().map(e => (
+              <div key={e.id} style={{display: "flex", justifyContent: "space-between", gap: 10, padding: "8px 0", borderTop: "1px solid var(--grey-light)"}}>
+                <div style={{minWidth: 0}}>
+                  <div style={{fontSize: 13, fontWeight: 600}}>{e.description || e.category}</div>
+                  <div style={{fontSize: 11, color: "var(--grey)"}}>
+                    {e.date} · {e.category}{e.source === "payment" || e.source === "expense" ? " · automatic" : ""}
+                  </div>
+                </div>
+                <div style={{textAlign: "right", whiteSpace: "nowrap"}}>
+                  <div style={{fontSize: 13, fontWeight: 600, color: e.income > 0 ? "var(--ok)" : "var(--magenta-dark)"}}>{e.income > 0 ? "+" + fmt(e.income) : "−" + fmt(e.expense)}</div>
+                  <div style={{fontSize: 11, color: "var(--grey)"}}>= {fmt(e.balance)}</div>
+                  {isOwner && e.source === "manual" && <span style={{fontSize: 11, color: "var(--grey)", textDecoration: "underline", cursor: "pointer"}} onClick={() => remove(e.id)}>remove</span>}
+                </div>
+              </div>
+            ))}
+          </div>
+        </React.Fragment>
+      )}
+    </div>
+  );
+}
 
 function AccountingView({ pin }) {
   const [periodType, setPeriodType] = useState("month");
@@ -4914,7 +5096,8 @@ function AccountingView({ pin }) {
   const [expTva, setExpTva] = useState("");
   const [expTtc, setExpTtc] = useState("");
   const [expReceipt, setExpReceipt] = useState("");
-  const [expMethod, setExpMethod] = useState("");
+  const [expMethod, setExpMethod] = useState("cash");
+  const [expCity, setExpCity] = useState("Sousse");
   const [expBusy, setExpBusy] = useState(false);
   const [expNote, setExpNote] = useState("");
   const [showExpenseForm, setShowExpenseForm] = useState(false);
@@ -4976,7 +5159,7 @@ function AccountingView({ pin }) {
   const resetExpenseForm = () => {
     setExpDate(new Date().toISOString().split("T")[0]); setExpCategory(""); setExpDesc("");
     setExpSupplier(""); setExpMf(""); setExpHt(""); setExpTva(""); setExpTtc("");
-    setExpReceipt(""); setExpMethod("");
+    setExpReceipt(""); setExpMethod("cash");
   };
 
   const submitExpense = () => {
@@ -4988,7 +5171,7 @@ function AccountingView({ pin }) {
     apiCall({
       action: "addExpense", pin, date: expDate, category: expCategory, description: expDesc,
       supplier: expSupplier, supplierMf: expMf, amountHt: expHt, tva: expTva, amountTtc: expTtc,
-      receiptNo: expReceipt, method: expMethod
+      receiptNo: expReceipt, method: expMethod, city: expCity
     }).then(res => {
       setExpBusy(false);
       if (res.success) {
@@ -5109,7 +5292,16 @@ function AccountingView({ pin }) {
                 <p style={{fontSize: 11, color: "var(--grey)", margin: "4px 0"}}>Fill in any combination — the others are calculated (19% TVA assumed if only one amount is given).</p>
                 <div className="payment-form-row" style={{marginTop: 6}}>
                   <input className="form-input" placeholder="Receipt No." value={expReceipt} onChange={e => setExpReceipt(e.target.value)} />
-                  <input className="form-input" placeholder="Payment method" value={expMethod} onChange={e => setExpMethod(e.target.value)} />
+                  <select className="form-select" value={expMethod} onChange={e => setExpMethod(e.target.value)}>
+                    <option value="cash">Paid in cash</option>
+                    <option value="bank transfer">Bank transfer</option>
+                    <option value="card">Card</option>
+                    <option value="cheque">Cheque</option>
+                  </select>
+                  <select className="form-select" value={expCity} onChange={e => setExpCity(e.target.value)}>
+                    <option value="Sousse">Sousse</option>
+                    <option value="Tunis">Tunis</option>
+                  </select>
                 </div>
                 <button className="btn-small" style={{marginTop: 8}} onClick={submitExpense} disabled={expBusy}>
                   {expBusy ? "Saving..." : "Save expense"}
@@ -5125,7 +5317,7 @@ function AccountingView({ pin }) {
                   <div>
                     <div style={{fontSize: 13, fontWeight: 600}}>{e.date} · {e.description}</div>
                     <div style={{fontSize: 12, color: "var(--grey)"}}>
-                      {e.category ? e.category + " · " : ""}{e.supplier}{e.receiptNo ? " · Reçu " + e.receiptNo : ""}
+                      {e.category ? e.category + " · " : ""}{e.supplier}{e.receiptNo ? " · Reçu " + e.receiptNo : ""}{e.city ? " · " + e.city : ""}{e.method ? " · " + e.method : ""}
                     </div>
                   </div>
                   <div style={{textAlign: "right", whiteSpace: "nowrap"}}>
