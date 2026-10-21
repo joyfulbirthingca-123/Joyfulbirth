@@ -999,6 +999,7 @@ function NewAppointmentModal({ pin, clients, packages, onClose, onCreated }) {
       pin,
       clientName,
       phone: selectedClient ? selectedClient.phone : "",
+      clientId: useExisting && selectedClient ? selectedClient.id : "",
       date,
       time,
       duration,
@@ -1153,7 +1154,7 @@ function NewAppointmentModal({ pin, clients, packages, onClose, onCreated }) {
   );
 }
 
-function TodayView({ pin, data, onRefresh }) {
+function TodayView({ pin, data, onRefresh, onReview }) {
   const [showNew, setShowNew] = useState(false);
   const [clients, setClients] = useState([]);
   const [packages, setPackages] = useState([]);
@@ -1173,6 +1174,15 @@ function TodayView({ pin, data, onRefresh }) {
     <div>
       <h1 className="page-title">Upcoming appointments</h1>
       <p className="page-sub">{upcoming.length > 0 ? upcoming.length + " appointment" + (upcoming.length !== 1 ? "s" : "") + " coming up" : "Everything coming up across your client list"}</p>
+
+      {data.unlinked && data.unlinked.bookings > 0 && onReview && (
+        <div className="card" style={{background: "#FEF3CD", color: "#92400E", margin: "0 0 14px", padding: "12px 14px", display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap"}}>
+          <span style={{flex: 1, fontSize: 13}}>
+            {data.unlinked.people} {data.unlinked.people === 1 ? "person has" : "people have"} {data.unlinked.bookings} booking{data.unlinked.bookings !== 1 ? "s" : ""} but no client profile yet.
+          </span>
+          <button className="btn-small" onClick={onReview}>Review</button>
+        </div>
+      )}
 
       <button className="add-client-btn" onClick={() => setShowNew(true)}>+ New appointment</button>
 
@@ -2637,7 +2647,131 @@ function ImportClientsView({ pin, onClose, onImported }) {
   );
 }
 
-function ClientsView({ pin, currentStaff }) {
+// Owner tool: attach every booking to its client profile (by a Client ID, not by typed name).
+// It shows what it would do first; nothing is written until the owner confirms.
+function LinkBookingsModal({ pin, onClose, onChanged }) {
+  const [plan, setPlan] = useState(null);
+  const [err, setErr] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [msg, setMsg] = useState("");
+
+  const load = () => {
+    setErr("");
+    apiCall({ action: "getBookingLinkPlan", pin }).then(res => {
+      if (res.success) setPlan(res); else setErr(res.error || "Couldn't check your bookings.");
+    }).catch(() => setErr("Couldn't reach the server. Please try again."));
+  };
+  useEffect(() => { load(); }, []);
+
+  const apply = () => {
+    setBusy(true);
+    setMsg("");
+    apiCall({ action: "applyBookingLinks", pin }).then(res => {
+      setBusy(false);
+      if (res.success) {
+        setMsg("Linked " + res.linked + " booking" + (res.linked !== 1 ? "s" : "") +
+          (res.skipped ? " (" + res.skipped + " changed while linking — press the button again)" : "") + ".");
+        load();
+        if (onChanged) onChanged();
+      } else {
+        setMsg(res.error || "Could not link the bookings.");
+      }
+    }).catch(() => { setBusy(false); setMsg("Couldn't reach the server. Press Link again; it is safe to repeat."); });
+  };
+
+  const linkOne = (bookingId, clientId) => {
+    setBusy(true);
+    setMsg("");
+    apiCall({ action: "linkBooking", pin, bookingId, clientId }).then(res => {
+      setBusy(false);
+      if (res.success) { setMsg("Linked."); load(); if (onChanged) onChanged(); }
+      else setMsg(res.error || "Could not link.");
+    }).catch(() => { setBusy(false); setMsg("Couldn't reach the server. Please try again."); });
+  };
+
+  const why = {
+    "similar": "Name is spelled differently from a profile",
+    "phone-other-name": "Same phone number as a profile, but a different name",
+    "ambiguous": "Could belong to more than one profile"
+  };
+
+  return (
+    <div className="modal-overlay" onClick={onClose}>
+      <div className="modal-box" style={{maxWidth: 600}} onClick={e => e.stopPropagation()}>
+        <h2>Link bookings to clients</h2>
+        <p className="page-sub" style={{marginBottom: 14}}>
+          Each booking gets tied to its client profile, so a different spelling of the name no longer breaks the connection. This only adds a link. It never changes a price or creates a profile.
+        </p>
+
+        {err && <LoadError message={err} onRetry={load} />}
+        {!plan && !err && <div className="loading">Checking your bookings...</div>}
+
+        {msg && (
+          <div role="status" style={{background: "var(--ok-bg)", color: "var(--ok)", borderRadius: 8, padding: "8px 12px", marginBottom: 12, fontSize: 12}}>{msg}</div>
+        )}
+
+        {plan && (
+          <React.Fragment>
+            <div className="component-block">
+              <div className="component-label">What I found</div>
+              <div className="ledger-row"><span>Bookings in your sheet</span><span style={{fontWeight: 600}}>{plan.bookings}</span></div>
+              <div className="ledger-row"><span>Already linked</span><span style={{fontWeight: 600}}>{plan.alreadyLinked}</span></div>
+              <div className="ledger-row"><span>Can be linked now, safely</span><span style={{fontWeight: 600, color: "var(--magenta-dark)"}}>{plan.willLink}</span></div>
+              {plan.willLink > 0 && (
+                <div style={{fontSize: 11, color: "var(--grey)", padding: "0 0 6px"}}>
+                  {plan.willLinkByPhone} matched by phone number (last 8 digits), {plan.willLinkByName} by the exact same name.
+                </div>
+              )}
+              <div className="ledger-row"><span>Need your decision</span><span style={{fontWeight: 600}}>{plan.needsALookTotal}</span></div>
+              <div className="ledger-row"><span>People with bookings but no profile</span><span style={{fontWeight: 600}}>{plan.noProfilePeople}</span></div>
+            </div>
+
+            {!plan.hasColumn && (
+              <p style={{fontSize: 12, color: "var(--grey)", margin: "4px 0 10px"}}>
+                First time: this adds ONE new column, “Client ID”, at the far right of your Bookings sheet. Nothing else in the sheet moves or changes.
+              </p>
+            )}
+            <button className="btn-confirm" disabled={busy || plan.willLink === 0} onClick={apply}>
+              {busy ? "Working..." : plan.willLink === 0 ? "Nothing to link right now" : "Link " + plan.willLink + " booking" + (plan.willLink !== 1 ? "s" : "")}
+            </button>
+
+            {plan.needsALook.length > 0 && (
+              <div className="component-block" style={{marginTop: 16, background: "#FFFBEB"}}>
+                <div className="component-label">Need your decision ({plan.needsALookTotal})</div>
+                {plan.needsALook.map(b => (
+                  <div key={b.bookingId} style={{padding: "8px 0", borderTop: "1px solid var(--grey-light)"}}>
+                    <div style={{fontSize: 13, fontWeight: 600}}>{b.name} <span style={{fontWeight: 400, color: "var(--grey)"}}>· {b.date} · {b.service}</span></div>
+                    <div style={{fontSize: 11, color: "#92400E", margin: "2px 0 6px"}}>{why[b.how] || b.how}</div>
+                    <div style={{display: "flex", gap: 6, flexWrap: "wrap"}}>
+                      {b.candidates.map(c => (
+                        <button key={c.id} className="btn-small" disabled={busy} onClick={() => linkOne(b.bookingId, c.id)}>Link to {c.name}</button>
+                      ))}
+                    </div>
+                  </div>
+                ))}
+                <p style={{fontSize: 11, color: "var(--grey)", margin: "8px 0 0"}}>If none of these is the right person, leave it. Create their profile with Import and it will attach by itself.</p>
+              </div>
+            )}
+
+            {plan.noProfilePeople > 0 && (
+              <div className="component-block" style={{marginTop: 12}}>
+                <div className="component-label">No profile yet ({plan.noProfilePeople} {plan.noProfilePeople === 1 ? "person" : "people"})</div>
+                <div style={{fontSize: 13, lineHeight: 1.6}}>{plan.noProfileNames.join(" · ")}</div>
+                <p style={{fontSize: 11, color: "var(--grey)", margin: "8px 0 0"}}>
+                  Create their profiles from Clients → Import from bookings/fiches (or from the Calendar), and their bookings will attach automatically.
+                </p>
+              </div>
+            )}
+          </React.Fragment>
+        )}
+
+        <button className="btn-secondary" style={{marginTop: 14}} onClick={onClose}>Done</button>
+      </div>
+    </div>
+  );
+}
+
+function ClientsView({ pin, currentStaff, autoOpen, onAutoOpened }) {
   const [search, setSearch] = useState("");
   const [sortBy, setSortBy] = useState("name-az");
   const [fStatus, setFStatus] = useState("all");
@@ -2651,6 +2785,14 @@ function ClientsView({ pin, currentStaff }) {
   const [showNewClient, setShowNewClient] = useState(false);
   const [showImport, setShowImport] = useState(false);
   const [showMerge, setShowMerge] = useState(false);
+  const [showLink, setShowLink] = useState(false);
+  // The Today banner can send the user straight to the right window.
+  useEffect(() => {
+    if (!autoOpen) return;
+    if (autoOpen === "link") setShowLink(true);
+    if (autoOpen === "import") setShowImport(true);
+    if (onAutoOpened) onAutoOpened();
+  }, [autoOpen]);
   const [importMsg, setImportMsg] = useState("");
   const [loadError, setLoadError] = useState("");
 
@@ -2743,6 +2885,9 @@ function ClientsView({ pin, currentStaff }) {
       <button className="add-client-btn" style={{background: "var(--grey-light)", color: "var(--grey)", marginLeft: 8}} onClick={() => printClientList()}>Print list</button>
       {currentStaff && currentStaff.role === "owner" && (
         <button className="add-client-btn" style={{background: "var(--grey-light)", color: "var(--grey)", marginLeft: 8}} onClick={() => setShowMerge(true)}>Consolidate duplicates</button>
+      )}
+      {currentStaff && currentStaff.role === "owner" && (
+        <button className="add-client-btn" style={{background: "var(--grey-light)", color: "var(--grey)", marginLeft: 8}} onClick={() => setShowLink(true)}>Link bookings to clients</button>
       )}
 
       {importMsg && (
@@ -2847,6 +2992,10 @@ function ClientsView({ pin, currentStaff }) {
           onClose={() => setShowMerge(false)}
           onMerged={() => load()}
         />
+      )}
+
+      {showLink && (
+        <LinkBookingsModal pin={pin} onClose={() => setShowLink(false)} onChanged={load} />
       )}
 
       {showImport && (
@@ -3626,8 +3775,12 @@ function CalendarView({ pin, currentStaff }) {
   }, [pin]);
 
   // Find a client profile by name (calendar feed only carries the name)
-  const openProfileFor = (name) => {
-    const match = clients.find(c => c.name.toLowerCase() === String(name || "").toLowerCase());
+  // A booking's own link (Client ID) wins; the typed name is only a fallback for unlinked bookings.
+  const profileForAppt = (a) =>
+    (a.clientId && clients.find(c => c.id === a.clientId)) ||
+    clients.find(c => c.name.toLowerCase() === String(a.clientName || "").toLowerCase());
+  const openProfileFor = (a) => {
+    const match = profileForAppt(a);
     if (match) setProfileClient(match);
   };
 
@@ -3767,8 +3920,8 @@ function CalendarView({ pin, currentStaff }) {
               {selectedAppt.status && <div className="ledger-row"><span style={{color: "var(--grey)"}}>Status</span><span>{selectedAppt.status}</span></div>}
             </div>
 
-            {clients.find(c => c.name.toLowerCase() === String(selectedAppt.clientName || "").toLowerCase()) ? (
-              <button className="btn-confirm" style={{marginTop: 12}} onClick={() => { openProfileFor(selectedAppt.clientName); setSelectedAppt(null); }}>
+            {profileForAppt(selectedAppt) ? (
+              <button className="btn-confirm" style={{marginTop: 12}} onClick={() => { openProfileFor(selectedAppt); setSelectedAppt(null); }}>
                 View client profile
               </button>
             ) : selectedAppt.isGroup ? (
@@ -4356,6 +4509,7 @@ function ReportsHub({ pin }) {
 
 function Dashboard({ staff, pin, onLogout }) {
   const [view, setView] = useState("today");
+  const [clientsOpen, setClientsOpen] = useState(null);   // set by the Today banner: "link" (owner) or "import" (staff)
   const [data, setData] = useState(null);
   const [packages, setPackages] = useState([]);
   const [staffList, setStaffList] = useState([]);
@@ -4448,11 +4602,11 @@ function Dashboard({ staff, pin, onLogout }) {
       <div className="main">
         {!data && !loadError && <div className="loading">Loading dashboard...</div>}
         {!data && loadError && <LoadError message={loadError} onRetry={() => { setLoadError(""); loadData(); }} />}
-        {data && view === "today" && <TodayView pin={pin} data={data} onRefresh={loadData} />}
+        {data && view === "today" && <TodayView pin={pin} data={data} onRefresh={loadData} onReview={() => { setClientsOpen(staff.role === "owner" ? "link" : "import"); setView("clients"); }} />}
         {data && view === "calendar" && <CalendarView pin={pin} currentStaff={staff} />}
         {data && view === "groups" && <GroupClassesView pin={pin} currentStaff={staff} />}
         {data && view === "messages" && <MessagesView pin={pin} />}
-        {data && view === "clients" && <ClientsView pin={pin} currentStaff={staff} />}
+        {data && view === "clients" && <ClientsView pin={pin} currentStaff={staff} autoOpen={clientsOpen} onAutoOpened={() => setClientsOpen(null)} />}
         {data && view === "invoice" && <InvoicesHub pin={pin} />}
         {data && view === "reports" && staff.role === "owner" && <ReportsHub pin={pin} />}
       </div>
