@@ -1154,6 +1154,26 @@ function NewAppointmentModal({ pin, clients, packages, onClose, onCreated }) {
   );
 }
 
+// Tells the reader that add-on services are inside the totals, and flags any that were left out as already counted.
+function AddOnNote({ addOns }) {
+  if (!addOns || (addOns.count === 0 && (addOns.excluded || []).length === 0)) return null;
+  const ex = addOns.excluded || [];
+  return (
+    <div style={{margin: "0 0 14px"}}>
+      {addOns.count > 0 && (
+        <p style={{fontSize: 12, color: "var(--grey)", margin: "0 0 6px"}}>
+          Includes <strong>{addOns.count}</strong> add-on service{addOns.count !== 1 ? "s" : ""} ({addOns.total} TND) added to client profiles.
+        </p>
+      )}
+      {ex.length > 0 && (
+        <div style={{background: "#FFFBEB", border: "1px solid #F6E3A1", borderRadius: 8, padding: "8px 12px", fontSize: 12, color: "#92400E"}}>
+          Not counted twice: {ex.length} add-on{ex.length !== 1 ? "s" : ""} match a booking for the same person, day and amount ({ex.map(e => e.clientName + " " + e.amount + " TND, " + e.date).join("; ")}). If one of these is a genuinely separate service, change its amount or date.
+        </div>
+      )}
+    </div>
+  );
+}
+
 // One tap to turn a pending (new) client into a real one: pick the package, say if they already paid.
 function ConfirmNewClient({ client, packages, pin, onDone }) {
   const [packageId, setPackageId] = useState(client.suggestedPackageId || "");
@@ -4466,7 +4486,7 @@ function ReportsView({ pin }) {
   const printReport = () => {
     if (!report) return;
     let body = "<h1>Business report — " + escapeHtml(report.label) + "</h1>";
-    body += '<div class="meta">' + report.totalBookings + " bookings · " + escapeHtml(report.totalRevenue) + " TND total (taxable)</div>";
+    body += '<div class="meta">' + report.totalBookings + " bookings · " + escapeHtml(report.totalRevenue) + " TND total (taxable)" + (report.addOns && report.addOns.count > 0 ? " · includes " + report.addOns.count + " add-on service(s), " + escapeHtml(report.addOns.total) + " TND" : "") + "</div>";
 
     body += "<h2>By service</h2><table><thead><tr><th>Service</th><th>Sessions</th><th>Unique clients</th><th>Revenue (TND)</th></tr></thead><tbody>";
     body += report.services.map(s => "<tr><td>" + escapeHtml(s.service) + "</td><td>" + s.sessions + "</td><td>" + s.uniqueClients + "</td><td>" + escapeHtml(s.revenue) + "</td></tr>").join("");
@@ -4536,6 +4556,7 @@ function ReportsView({ pin }) {
             <Stat label="Total clients" value={report.clients.total} />
             <Stat label="New this period" value={report.clients.newInPeriod} />
           </div>
+          <AddOnNote addOns={report.addOns} />
 
           <div className="card">
             <div className="component-label">By service — sessions, clients &amp; revenue</div>
@@ -4809,6 +4830,7 @@ function AccountingView({ pin }) {
 
     body += "<h2>Income</h2><div class='section'>";
     body += '<div class="row"><span class="label">Bookings in period</span><span>' + escapeHtml(report.income.bookings) + "</span></div>";
+    if (report.addOns && report.addOns.count > 0) body += '<div class="row"><span class="label">Add-on services included</span><span>' + escapeHtml(report.addOns.count) + " (" + escapeHtml(report.addOns.total) + " TND)</span></div>";
     body += '<div class="row"><span class="label">CA HT (taxable)</span><span>' + escapeHtml(report.income.caHt) + " TND</span></div>";
     body += '<div class="row"><span class="label">TVA collectée (19%)</span><span>' + escapeHtml(report.income.tvaCollected) + " TND</span></div>";
     body += '<div class="row"><span class="label">CA TTC (taxable)</span><span>' + escapeHtml(report.income.caTtc) + " TND</span></div>";
@@ -4911,6 +4933,7 @@ function AccountingView({ pin }) {
             <div className="ledger-row" style={{fontWeight: 600}}><span>CA TTC (taxable)</span><span>{report.income.caTtc} TND</span></div>
             <div className="ledger-row" style={{fontSize: 12, color: "var(--grey)"}}><span>Transport received (non-taxable)</span><span>{report.income.transport} TND</span></div>
             <div className="ledger-row" style={{fontSize: 12, color: "var(--grey)"}}><span>Total received (incl. transport)</span><span>{report.income.totalReceived} TND</span></div>
+            <div style={{marginTop: 8}}><AddOnNote addOns={report.addOns} /></div>
           </div>
 
           <div className="card">
