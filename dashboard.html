@@ -2494,7 +2494,7 @@ function ImportClientsView({ pin, onClose, onImported }) {
         setDebug(res.debug || null);
         const initial = {};
         res.candidates.forEach(c => {
-          initial[c.key || c.phone] = { packageId: c.suggestedPackageId, skip: !c.suggestedPackageId };
+          initial[c.key || c.phone] = { packageId: c.suggestedPackageId, skip: !c.suggestedPackageId || !!c.possibleMatch };
         });
         setSelections(initial);
       } else {
@@ -2520,14 +2520,15 @@ function ImportClientsView({ pin, onClose, onImported }) {
         name: c.name,
         phone: c.rawPhone,
         email: c.email,
-        packageId: selections[c.key || c.phone].packageId
+        packageId: selections[c.key || c.phone].packageId,
+        force: c.possibleMatch ? "1" : ""
       }));
     if (approvedList.length === 0) return;
     setImporting(true);
     setErrorMsg("");
     apiCall({ action: "importApprovedClients", pin, approvedList: JSON.stringify(approvedList) }).then(res => {
       setImporting(false);
-      if (res.success) onImported(res.created);
+      if (res.success) onImported(res.created, res.skipped || []);
       else setErrorMsg(res.error || "The import didn't finish. Check your client list before trying again.");
     }).catch(() => {
       setImporting(false);
@@ -2584,11 +2585,16 @@ function ImportClientsView({ pin, onClose, onImported }) {
                       <div className="import-name">{c.name}</div>
                       <div className="import-phone">{c.rawPhone}</div>
                     </div>
-                    <span className={"confidence-tag " + (c.confidence === "likely" ? "likely" : "needs-review")}>
-                      {c.confidence === "likely" ? "Likely" : "Needs review"}
+                    <span className={"confidence-tag " + (c.possibleMatch ? "needs-review" : (c.confidence === "likely" ? "likely" : "needs-review"))}>
+                      {c.possibleMatch ? "Possible duplicate" : (c.confidence === "likely" ? "Likely" : "Needs review")}
                     </span>
                   </div>
                   <div className="import-sources">{c.sources.join(" \u00b7 ")}</div>
+                  {c.possibleMatch && (
+                    <div style={{background: "#FEF3CD", color: "#92400E", borderRadius: 6, padding: "6px 8px", marginTop: 6, fontSize: 12}}>
+                      Looks like existing client “{c.possibleMatch.name}” ({c.possibleMatch.reason}). Skipped so you don't get a second profile. If it's a different person, choose “Include this client”.
+                    </div>
+                  )}
 
                   {!sel.skip && (
                     <div className="import-pkg-select">
@@ -2838,11 +2844,13 @@ function ClientsView({ pin, currentStaff }) {
         <ImportClientsView
           pin={pin}
           onClose={() => setShowImport(false)}
-          onImported={(count) => {
+          onImported={(count, skipped) => {
             setShowImport(false);
-            setImportMsg(count + " client" + (count !== 1 ? "s" : "") + " imported successfully.");
+            const sk = skipped || [];
+            setImportMsg(count + " client" + (count !== 1 ? "s" : "") + " imported successfully." +
+              (sk.length ? " " + sk.length + " skipped because they already have a profile: " + sk.map(x => x.name).join(", ") + "." : ""));
             load();
-            setTimeout(() => setImportMsg(""), 5000);
+            setTimeout(() => setImportMsg(""), sk.length ? 15000 : 5000);
           }}
         />
       )}
