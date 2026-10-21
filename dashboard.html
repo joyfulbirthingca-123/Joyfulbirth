@@ -1606,8 +1606,9 @@ function MergeClientsModal({ pin, onClose, onMerged }) {
         setWarnings({ sharedPhone: res.sharedPhone || [], businessNumber: res.businessNumber || [] });
         // Sure matches: oldest profile kept, the rest pre-ticked. Similar ones: NOTHING pre-ticked.
         const p = {}, k = {};
+        const fuller = (g) => g.clients.slice().sort((a, b) => (String(b.name).trim().split(/\s+/).length - String(a.name).trim().split(/\s+/).length) || ((b.phone ? 1 : 0) - (a.phone ? 1 : 0)))[0].id;
         all.forEach(g => {
-          p[g.key] = g.clients[0].id;
+          p[g.key] = (g.kind === "similar" && /^first name/.test(g.matchedOn || "")) ? fuller(g) : g.clients[0].id;
           k[g.key] = {};
           if (g.kind === "sure") g.clients.slice(1).forEach(c => { k[g.key][c.id] = true; });
         });
@@ -1672,8 +1673,21 @@ function MergeClientsModal({ pin, onClose, onMerged }) {
         {groups && groups.map(g => (
           <div className="component-block" key={g.key} style={g.kind === "similar" ? {background: "#FFFBEB"} : undefined}>
             <div className="component-label">
-              {g.clients[0].name} — {g.clients.length} profiles ({g.kind === "similar" ? "spelled differently — check carefully, nothing is pre-selected" : "matched on " + g.matchedOn})
+              {g.clients[0].name} — {g.clients.length} profiles ({g.kind === "similar" ? (/^first name/.test(g.matchedOn) ? "same first name — check the dates below, nothing is pre-selected" : "spelled differently — check carefully, nothing is pre-selected") : "matched on " + g.matchedOn})
             </div>
+            {g.evidence && g.evidence.length > 0 && (
+              <div style={{background: "#ECFDF3", border: "1px solid #BFE8CF", borderRadius: 8, padding: "6px 10px", margin: "4px 0 8px", fontSize: 12, color: "#166534"}}>
+                <strong>Same-day activity:</strong>
+                {g.evidence.map(ev => (
+                  <div key={ev.date}>
+                    {ev.date}: {g.clients.filter(c => ev.byClient[c.id]).map(c => c.name + " (" + ev.byClient[c.id].join(", ") + ")").join("  ·  ")}
+                  </div>
+                ))}
+              </div>
+            )}
+            {g.kind === "similar" && (!g.evidence || g.evidence.length === 0) && /^first name/.test(g.matchedOn) && (
+              <div style={{fontSize: 12, color: "#92400E", margin: "4px 0 8px"}}>No booking, fiche or payment falls on the same day, so only the first name connects them.</div>
+            )}
             {g.clients.map(c => (
               <div className="ledger-row" key={c.id} style={{alignItems: "center"}}>
                 <label style={{display: "flex", alignItems: "center", gap: 8, cursor: "pointer", flex: 1}}>
@@ -1688,6 +1702,11 @@ function MergeClientsModal({ pin, onClose, onMerged }) {
                     <span style={{fontSize: 11, color: "var(--grey)", display: "block"}}>
                       {c.packageId || "no package"}{c.phone ? " · " + c.phone : ""}
                     </span>
+                    {c.activity && c.activity.length > 0 && (
+                      <span style={{fontSize: 11, color: "var(--grey)", display: "block"}}>
+                        {c.activity.slice(0, 4).map(a => a.date + " " + a.kinds.join("/")).join(" · ")}
+                      </span>
+                    )}
                   </span>
                 </label>
                 {primary[g.key] === c.id ? (
@@ -4948,6 +4967,13 @@ function CaisseView({ pin, staff }) {
       done(d === 0 ? "Counted " + res.counted + " TND: exactly what was expected." : "Counted " + res.counted + " TND; expected " + res.expected + " TND (" + (d > 0 ? "+" : "") + d + " TND)." + (res.adjusted ? " The caisse now matches your count." : ""));
     }).catch(() => fail());
   };
+  const otherCity = city === "Sousse" ? "Tunis" : "Sousse";
+  const moveLine = (id) => {
+    if (!window.confirm("Move this line to the " + otherCity + " caisse?")) return;
+    apiCall({ action: "moveCaisseEntry", pin, entryId: id, toCity: otherCity }).then(res => {
+      if (res.success) { setMsg("Moved to the " + otherCity + " caisse."); load(); } else setMsg(res.error || "Could not move.");
+    }).catch(() => setMsg("Couldn't reach the server."));
+  };
   const remove = (id) => {
     if (!window.confirm("Remove this line from the caisse?")) return;
     apiCall({ action: "deleteCaisseEntry", pin, entryId: id }).then(res => { if (res.success) load(); else setMsg(res.error || "Could not remove."); }).catch(() => setMsg("Couldn't reach the server."));
@@ -5011,7 +5037,7 @@ function CaisseView({ pin, staff }) {
             <div className="card">
               {(panel === "in" || panel === "out") && (
                 <React.Fragment>
-                  <div className="component-label">{panel === "in" ? "Cash in" : "Cash out"}</div>
+                  <div className="component-label">{panel === "in" ? "Cash in" : "Cash out"} · {city} caisse</div>
                   <p style={{fontSize: 12, color: "var(--grey)", margin: "2px 0 6px"}}>{panel === "in" ? "For example money from La Bulle des mamans, or cash taken out of the bank. Client payments are added by themselves when you record them." : "For example a bank deposit or pay to staff. Cash expenses entered in Reports are added by themselves."}</p>
                   <div className="payment-form-row">
                     <input className="form-input" type="date" max={todayStr} value={fDate} onChange={e => setFDate(e.target.value)} />
@@ -5070,6 +5096,7 @@ function CaisseView({ pin, staff }) {
                 <div style={{textAlign: "right", whiteSpace: "nowrap"}}>
                   <div style={{fontSize: 13, fontWeight: 600, color: e.income > 0 ? "var(--ok)" : "var(--magenta-dark)"}}>{e.income > 0 ? "+" + fmt(e.income) : "−" + fmt(e.expense)}</div>
                   <div style={{fontSize: 11, color: "var(--grey)"}}>= {fmt(e.balance)}</div>
+                  {isOwner && e.source === "manual" && cities.length > 1 && <span style={{fontSize: 11, color: "var(--grey)", textDecoration: "underline", cursor: "pointer", marginRight: 8}} onClick={() => moveLine(e.id)}>move to {otherCity}</span>}
                   {isOwner && e.source === "manual" && <span style={{fontSize: 11, color: "var(--grey)", textDecoration: "underline", cursor: "pointer"}} onClick={() => remove(e.id)}>remove</span>}
                 </div>
               </div>
