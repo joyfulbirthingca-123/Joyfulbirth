@@ -862,9 +862,18 @@ function printInvoiceDoc(inv, invoiceNumber, lang) {
 // ─── WhatsApp message flow helpers ───
 // Builds a wa.me link that opens WhatsApp with a pre-written message. The
 // person still taps send — this is not automated sending.
+// WhatsApp needs the FULL international number (country code, digits only). Tunisian numbers
+// are stored every which way: "29204655", "+216 29 204 655", "21629204655", "0021629204655".
+// An 8-digit number with no country code used to produce wa.me/29204655, which is some other
+// country's number, so the message would go to the wrong person (or nobody).
+function waDigits(phone) {
+  let d = String(phone || "").replace(/[^\d]/g, "");
+  if (d.indexOf("00") === 0) d = d.slice(2);   // 00216... -> 216...
+  if (d.length === 8) d = "216" + d;           // Tunisian local number: add the country code
+  return d;                                    // already international (216..., or a foreign number): keep
+}
 function waLink(phone, message) {
-  const digits = String(phone || "").replace(/[^\d]/g, "");
-  return "https://wa.me/" + digits + "?text=" + encodeURIComponent(message);
+  return "https://wa.me/" + waDigits(phone) + "?text=" + encodeURIComponent(message);
 }
 function firstName(name) {
   return String(name || "").trim().split(" ")[0] || "there";
