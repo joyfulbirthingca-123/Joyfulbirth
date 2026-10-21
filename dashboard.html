@@ -1156,8 +1156,11 @@ function NewAppointmentModal({ pin, clients, packages, onClose, onCreated }) {
 
 // Tells the reader that add-on services are inside the totals, and flags any that were left out as already counted.
 function AddOnNote({ addOns }) {
-  if (!addOns || (addOns.count === 0 && (addOns.excluded || []).length === 0)) return null;
+  if (!addOns) return null;
   const ex = addOns.excluded || [];
+  const tu = addOns.topUps || { count: 0, total: 0 };
+  const un = addOns.uncovered || { clients: 0, total: 0 };
+  if (addOns.count === 0 && ex.length === 0 && tu.count === 0 && un.clients === 0) return null;
   return (
     <div style={{margin: "0 0 14px"}}>
       {addOns.count > 0 && (
@@ -1165,9 +1168,19 @@ function AddOnNote({ addOns }) {
           Includes <strong>{addOns.count}</strong> add-on service{addOns.count !== 1 ? "s" : ""} ({addOns.total} TND) added to client profiles.
         </p>
       )}
+      {tu.count > 0 && (
+        <p style={{fontSize: 12, color: "var(--grey)", margin: "0 0 6px"}}>
+          Includes <strong>{tu.count}</strong> package payment{tu.count !== 1 ? "s" : ""} ({tu.total} TND) recorded on client profiles that no priced booking already covers. Each is counted on the date it was recorded.
+        </p>
+      )}
       {ex.length > 0 && (
-        <div style={{background: "#FFFBEB", border: "1px solid #F6E3A1", borderRadius: 8, padding: "8px 12px", fontSize: 12, color: "#92400E"}}>
+        <div style={{background: "#FFFBEB", border: "1px solid #F6E3A1", borderRadius: 8, padding: "8px 12px", fontSize: 12, color: "#92400E", marginBottom: 6}}>
           Not counted twice: {ex.length} add-on{ex.length !== 1 ? "s" : ""} match a booking for the same person, day and amount ({ex.map(e => e.clientName + " " + e.amount + " TND, " + e.date).join("; ")}). If one of these is a genuinely separate service, change its amount or date.
+        </div>
+      )}
+      {un.clients > 0 && (
+        <div style={{background: "#F3F4F6", borderRadius: 8, padding: "8px 12px", fontSize: 12, color: "var(--grey)"}}>
+          Not in these numbers: {un.clients} client{un.clients !== 1 ? "s have" : " has"} a package ({un.total} TND in total) that no booking and no recorded payment covers. If they have paid, record the payment on their profile and it will count.
         </div>
       )}
     </div>
@@ -2923,6 +2936,88 @@ function LinkBookingsModal({ pin, onClose, onChanged }) {
   );
 }
 
+// Owner tool: payments that were received but never entered. Each row needs the REAL date the money arrived,
+// because the date decides which month it counts in for Reports and TVA.
+function RecordPaymentsModal({ clients, pin, onClose, onChanged }) {
+  const open = (clients || []).filter(c => String(c.status || "").toLowerCase() !== "new" && Number(c.balance) > 0.0005)
+    .sort((a, b) => String(a.name).localeCompare(String(b.name)));
+  const [rows, setRows] = useState(() => open.map(c => ({ id: c.id, name: c.name, pkg: c.packageName, owed: Number(c.balance), amount: String(Number(c.balance)), date: "", on: true })));
+  const [allDate, setAllDate] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [msg, setMsg] = useState("");
+  const [done, setDone] = useState(null);
+  const today = new Date().toISOString().split("T")[0];
+
+  const patch = (id, p) => setRows(rs => rs.map(r => r.id === id ? { ...r, ...p } : r));
+  const applyAll = () => { if (allDate) setRows(rs => rs.map(r => ({ ...r, date: allDate }))); };
+  const chosen = rows.filter(r => r.on);
+  const ready = chosen.filter(r => r.date && Number(r.amount) > 0 && r.date <= today);
+  const readyTotal = ready.reduce((s, r) => s + (Number(r.amount) || 0), 0);
+
+  const save = () => {
+    if (ready.length === 0) return;
+    if (ready.length !== chosen.length && !window.confirm((chosen.length - ready.length) + " ticked row(s) have no date or amount and will be left out. Continue?")) return;
+    setBusy(true);
+    setMsg("");
+    apiCall({ action: "recordPaymentsBulk", pin, approvedList: JSON.stringify(ready.map(r => ({ clientId: r.id, amount: Number(r.amount), date: r.date }))) }).then(res => {
+      setBusy(false);
+      if (res.success) { setDone(res); if (onChanged) onChanged(); }
+      else setMsg(res.error || "Could not record the payments.");
+    }).catch(() => { setBusy(false); setMsg("Couldn't reach the server. Check Clients before pressing again, so nothing is recorded twice."); });
+  };
+
+  return (
+    <div className="modal-overlay" onClick={onClose}>
+      <div className="modal-box" style={{maxWidth: 640}} onClick={e => e.stopPropagation()}>
+        <h2>Record payments you haven't entered</h2>
+        {done ? (
+          <React.Fragment>
+            <div role="status" style={{background: "var(--ok-bg)", color: "var(--ok)", borderRadius: 8, padding: "10px 14px", margin: "10px 0", fontSize: 13}}>
+              Recorded {done.recorded} cash payment{done.recorded !== 1 ? "s" : ""} ({done.total} TND).
+              {done.skipped && done.skipped.length > 0 && " " + done.skipped.length + " skipped: " + done.skipped.map(s => (s.name || s.clientId) + " (" + s.reason + ")").join("; ") + "."}
+            </div>
+            <button className="btn-secondary" onClick={onClose}>Done</button>
+          </React.Fragment>
+        ) : (
+          <React.Fragment>
+            <p className="page-sub" style={{marginBottom: 10}}>
+              These clients show a balance, but you've told me they've all paid in cash. Enter the <strong>real date the money arrived</strong> for each: that date decides which month it counts in for Reports and TVA. Each is recorded as one cash payment.
+            </p>
+            {open.length === 0 && <p style={{fontSize: 13, color: "var(--grey)"}}>No client has an open balance. Nothing to record.</p>}
+            {open.length > 0 && (
+              <React.Fragment>
+                <div style={{display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap", marginBottom: 10}}>
+                  <span style={{fontSize: 12, color: "var(--grey)"}}>Same date for everyone:</span>
+                  <input className="form-input" type="date" max={today} style={{width: 160}} value={allDate} onChange={e => setAllDate(e.target.value)} />
+                  <button className="btn-small" disabled={!allDate} onClick={applyAll}>Fill all dates</button>
+                </div>
+                <div style={{maxHeight: 340, overflowY: "auto", border: "1px solid var(--grey-light)", borderRadius: 8}}>
+                  {rows.map(r => (
+                    <div key={r.id} style={{display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap", padding: "8px 10px", borderBottom: "1px solid var(--grey-light)", opacity: r.on ? 1 : 0.5}}>
+                      <input type="checkbox" checked={r.on} onChange={e => patch(r.id, { on: e.target.checked })} />
+                      <div style={{flex: "1 1 160px", minWidth: 140}}>
+                        <div style={{fontSize: 13, fontWeight: 600}}>{r.name}</div>
+                        <div style={{fontSize: 11, color: "var(--grey)"}}>{r.pkg} · owed {r.owed} TND</div>
+                      </div>
+                      <input className="form-input" type="number" min="0" step="0.001" style={{width: 90}} value={r.amount} onChange={e => patch(r.id, { amount: e.target.value })} />
+                      <input className="form-input" type="date" max={today} style={{width: 150}} value={r.date} onChange={e => patch(r.id, { date: e.target.value })} />
+                    </div>
+                  ))}
+                </div>
+                {msg && <p role="alert" style={{fontSize: 12, color: "var(--magenta-dark)", margin: "8px 0 0"}}>{msg}</p>}
+                <button className="btn-confirm" style={{marginTop: 12}} disabled={busy || ready.length === 0} onClick={save}>
+                  {busy ? "Recording..." : ready.length === 0 ? "Add a date to at least one row" : "Record " + ready.length + " payment" + (ready.length !== 1 ? "s" : "") + " (" + Math.round(readyTotal * 1000) / 1000 + " TND)"}
+                </button>
+              </React.Fragment>
+            )}
+            <button className="btn-secondary" style={{marginTop: 10, marginLeft: 8}} onClick={onClose}>Cancel</button>
+          </React.Fragment>
+        )}
+      </div>
+    </div>
+  );
+}
+
 function ClientsView({ pin, currentStaff, autoOpen, onAutoOpened }) {
   const [search, setSearch] = useState("");
   const [sortBy, setSortBy] = useState("name-az");
@@ -2938,6 +3033,7 @@ function ClientsView({ pin, currentStaff, autoOpen, onAutoOpened }) {
   const [showImport, setShowImport] = useState(false);
   const [showMerge, setShowMerge] = useState(false);
   const [showLink, setShowLink] = useState(false);
+  const [showPay, setShowPay] = useState(false);
   // The Today banner can send the user straight to the right window.
   useEffect(() => {
     if (!autoOpen) return;
@@ -3041,6 +3137,9 @@ function ClientsView({ pin, currentStaff, autoOpen, onAutoOpened }) {
       )}
       {currentStaff && currentStaff.role === "owner" && (
         <button className="add-client-btn" style={{background: "var(--grey-light)", color: "var(--grey)", marginLeft: 8}} onClick={() => setShowLink(true)}>Link bookings to clients</button>
+      )}
+      {currentStaff && currentStaff.role === "owner" && clients.some(c => String(c.status || "").toLowerCase() !== "new" && Number(c.balance) > 0.0005) && (
+        <button className="add-client-btn" style={{background: "var(--grey-light)", color: "var(--grey)", marginLeft: 8}} onClick={() => setShowPay(true)}>Record unentered payments</button>
       )}
 
       {importMsg && (
@@ -3150,6 +3249,9 @@ function ClientsView({ pin, currentStaff, autoOpen, onAutoOpened }) {
         />
       )}
 
+      {showPay && (
+        <RecordPaymentsModal clients={clients} pin={pin} onClose={() => setShowPay(false)} onChanged={load} />
+      )}
       {showLink && (
         <LinkBookingsModal pin={pin} onClose={() => setShowLink(false)} onChanged={load} />
       )}
@@ -4486,7 +4588,7 @@ function ReportsView({ pin }) {
   const printReport = () => {
     if (!report) return;
     let body = "<h1>Business report — " + escapeHtml(report.label) + "</h1>";
-    body += '<div class="meta">' + report.totalBookings + " bookings · " + escapeHtml(report.totalRevenue) + " TND total (taxable)" + (report.addOns && report.addOns.count > 0 ? " · includes " + report.addOns.count + " add-on service(s), " + escapeHtml(report.addOns.total) + " TND" : "") + "</div>";
+    body += '<div class="meta">' + report.totalBookings + " bookings · " + escapeHtml(report.totalRevenue) + " TND total (taxable)" + (report.addOns && report.addOns.count > 0 ? " · includes " + report.addOns.count + " add-on service(s), " + escapeHtml(report.addOns.total) + " TND" : "") + (report.addOns && report.addOns.topUps && report.addOns.topUps.count > 0 ? " · includes " + report.addOns.topUps.count + " package payment(s), " + escapeHtml(report.addOns.topUps.total) + " TND" : "") + "</div>";
 
     body += "<h2>By service</h2><table><thead><tr><th>Service</th><th>Sessions</th><th>Unique clients</th><th>Revenue (TND)</th></tr></thead><tbody>";
     body += report.services.map(s => "<tr><td>" + escapeHtml(s.service) + "</td><td>" + s.sessions + "</td><td>" + s.uniqueClients + "</td><td>" + escapeHtml(s.revenue) + "</td></tr>").join("");
@@ -4831,6 +4933,7 @@ function AccountingView({ pin }) {
     body += "<h2>Income</h2><div class='section'>";
     body += '<div class="row"><span class="label">Bookings in period</span><span>' + escapeHtml(report.income.bookings) + "</span></div>";
     if (report.addOns && report.addOns.count > 0) body += '<div class="row"><span class="label">Add-on services included</span><span>' + escapeHtml(report.addOns.count) + " (" + escapeHtml(report.addOns.total) + " TND)</span></div>";
+    if (report.addOns && report.addOns.topUps && report.addOns.topUps.count > 0) body += '<div class="row"><span class="label">Package payments included</span><span>' + escapeHtml(report.addOns.topUps.count) + " (" + escapeHtml(report.addOns.topUps.total) + " TND)</span></div>";
     body += '<div class="row"><span class="label">CA HT (taxable)</span><span>' + escapeHtml(report.income.caHt) + " TND</span></div>";
     body += '<div class="row"><span class="label">TVA collectée (19%)</span><span>' + escapeHtml(report.income.tvaCollected) + " TND</span></div>";
     body += '<div class="row"><span class="label">CA TTC (taxable)</span><span>' + escapeHtml(report.income.caTtc) + " TND</span></div>";
