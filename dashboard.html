@@ -1154,7 +1154,121 @@ function NewAppointmentModal({ pin, clients, packages, onClose, onCreated }) {
   );
 }
 
-function TodayView({ pin, data, onRefresh, onReview }) {
+// One tap to turn a pending (new) client into a real one: pick the package, say if they already paid.
+function ConfirmNewClient({ client, packages, pin, onDone }) {
+  const [packageId, setPackageId] = useState(client.suggestedPackageId || "");
+  const [paid, setPaid] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [msg, setMsg] = useState("");
+  const pkg = (packages || []).find(p => p.id === packageId);
+
+  const confirm = () => {
+    if (!packageId) { setMsg("Choose a package first."); return; }
+    setBusy(true);
+    setMsg("");
+    apiCall({ action: "confirmNewClient", pin, clientId: client.id, packageId, paid: paid ? "1" : "" }).then(res => {
+      setBusy(false);
+      if (res.success) onDone(res);
+      else setMsg(res.error || "Could not confirm.");
+    }).catch(() => { setBusy(false); setMsg("Couldn't reach the server. Please try again."); });
+  };
+
+  return (
+    <div style={{display: "flex", flexWrap: "wrap", alignItems: "center", gap: 8, marginTop: 8}}>
+      <select className="form-select" style={{flex: "1 1 190px", maxWidth: 260}} value={packageId} onChange={e => setPackageId(e.target.value)}>
+        <option value="">Choose a package…</option>
+        {(packages || []).map(p => <option key={p.id} value={p.id}>{p.name} — {p.price} TND</option>)}
+      </select>
+      <label style={{display: "flex", alignItems: "center", gap: 5, fontSize: 12, color: "var(--grey)", cursor: "pointer"}}>
+        <input type="checkbox" checked={paid} onChange={e => setPaid(e.target.checked)} />
+        Already paid{pkg ? " (" + pkg.price + " TND)" : ""}
+      </label>
+      <button className="btn-small" disabled={busy} onClick={confirm}>{busy ? "..." : "Confirm"}</button>
+      {msg && <span role="alert" style={{fontSize: 12, color: "var(--magenta-dark)", flexBasis: "100%"}}>{msg}</span>}
+    </div>
+  );
+}
+
+// Today: everyone who booked or filled a fiche and has no package yet.
+function NewClientsCard({ clients, packages, pin, isOwner, onChanged }) {
+  const pending = (clients || []).filter(c => String(c.status || "").toLowerCase() === "new");
+  const [busyId, setBusyId] = useState("");
+  if (pending.length === 0) return null;
+
+  const remove = (c) => {
+    if (!window.confirm("Remove " + c.name + " from your clients? Their bookings stay; only this new profile is deleted.")) return;
+    setBusyId(c.id);
+    apiCall({ action: "deleteClient", pin, clientId: c.id }).then(() => { setBusyId(""); onChanged(); }).catch(() => setBusyId(""));
+  };
+
+  return (
+    <div className="card" style={{margin: "0 0 14px", padding: "14px 16px", borderLeft: "4px solid var(--magenta)"}}>
+      <div style={{fontWeight: 600, color: "var(--magenta-dark)", marginBottom: 2}}>New clients ({pending.length})</div>
+      <p style={{fontSize: 12, color: "var(--grey)", margin: "0 0 6px"}}>
+        They booked or filled in a fiche. Choose their package to confirm — nothing is owed until you do.
+      </p>
+      {pending.map(c => (
+        <div key={c.id} style={{padding: "10px 0", borderTop: "1px solid var(--grey-light)", opacity: busyId === c.id ? 0.5 : 1}}>
+          <div style={{fontSize: 14, fontWeight: 600}}>
+            {c.name}
+            {c.phone && <span style={{fontWeight: 400, color: "var(--grey)", fontSize: 12}}> · {c.phone}</span>}
+          </div>
+          {c.notes && <div style={{fontSize: 12, color: "var(--grey)", margin: "2px 0"}}>{c.notes}</div>}
+          <ConfirmNewClient client={c} packages={packages} pin={pin} onDone={() => onChanged()} />
+          {isOwner && (
+            <span style={{fontSize: 11, color: "var(--grey)", textDecoration: "underline", cursor: "pointer", display: "inline-block", marginTop: 6}} onClick={() => remove(c)}>Not a real client — remove</span>
+          )}
+        </div>
+      ))}
+    </div>
+  );
+}
+
+// The client's intake fiche, looked up live by phone number (nothing is copied anywhere).
+function FichePanel({ client, pin }) {
+  const [open, setOpen] = useState(false);
+  const [state, setState] = useState({ loading: false, entries: null, note: "", error: "" });
+  if (!client.phone) return null;
+
+  const toggle = () => {
+    const next = !open;
+    setOpen(next);
+    if (next && !state.entries && !state.loading) {
+      setState({ loading: true, entries: null, note: "", error: "" });
+      apiCall({ action: "getFicheForClient", pin, clientId: client.id }).then(res => {
+        if (res.success) setState({ loading: false, entries: res.entries || [], note: res.note || "", error: "" });
+        else setState({ loading: false, entries: null, note: "", error: res.error || "Couldn't load the fiche." });
+      }).catch(() => setState({ loading: false, entries: null, note: "", error: "Couldn't reach the server. Please try again." }));
+    }
+  };
+
+  return (
+    <div className="component-block">
+      <div style={{display: "flex", justifyContent: "space-between", alignItems: "center"}}>
+        <div className="component-label" style={{margin: 0}}>Intake fiche</div>
+        <span style={{fontSize: 12, color: "var(--magenta-dark)", textDecoration: "underline", cursor: "pointer"}} onClick={toggle}>{open ? "Hide" : "Show"}</span>
+      </div>
+      {open && state.loading && <div className="loading" style={{padding: "10px 0"}}>Looking for their fiche...</div>}
+      {open && state.error && <p role="alert" style={{fontSize: 12, color: "var(--magenta-dark)", margin: "8px 0 0"}}>{state.error}</p>}
+      {open && state.entries && state.entries.length === 0 && (
+        <p style={{fontSize: 12, color: "var(--grey)", margin: "8px 0 0"}}>{state.note || "No fiche found for this phone number."}</p>
+      )}
+      {open && state.entries && state.entries.map((e, i) => (
+        <div key={i} style={{marginTop: 10}}>
+          <div style={{fontSize: 12, fontWeight: 600, color: "var(--grey)"}}>{e.source}{e.when ? " · " + e.when : ""}</div>
+          {e.answers.map((a, j) => (
+            <div key={j} style={{display: "flex", gap: 8, fontSize: 12, padding: "3px 0", borderTop: "1px solid var(--grey-light)"}}>
+              <span style={{flex: "0 0 38%", color: "var(--grey)"}}>{a.label}</span>
+              <span style={{flex: 1}}>{a.value}</span>
+            </div>
+          ))}
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function TodayView({ pin, data, onRefresh, onReview, refreshKey }) {
   const [showNew, setShowNew] = useState(false);
   const [clients, setClients] = useState([]);
   const [packages, setPackages] = useState([]);
@@ -1166,7 +1280,13 @@ function TodayView({ pin, data, onRefresh, onReview }) {
         if (res.packages) setPackages(res.packages);
       }
     });
-  }, [pin]);
+  }, [pin, refreshKey]);
+
+  const reloadClients = () => {
+    apiRead({ action: "getClients", pin }, (res, isFresh) => {
+      if (res.success && isFresh) { setClients(res.clients); if (res.packages) setPackages(res.packages); }
+    });
+  };
 
   const upcoming = data.upcoming || [];
 
@@ -1174,6 +1294,8 @@ function TodayView({ pin, data, onRefresh, onReview }) {
     <div>
       <h1 className="page-title">Upcoming appointments</h1>
       <p className="page-sub">{upcoming.length > 0 ? upcoming.length + " appointment" + (upcoming.length !== 1 ? "s" : "") + " coming up" : "Everything coming up across your client list"}</p>
+
+      <NewClientsCard clients={clients} packages={packages} pin={pin} isOwner={(data.staff || {}).role === "owner"} onChanged={reloadClients} />
 
       {data.unlinked && data.unlinked.bookings > 0 && onReview && (
         <div className="card" style={{background: "#FEF3CD", color: "#92400E", margin: "0 0 14px", padding: "12px 14px", display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap"}}>
@@ -2370,7 +2492,7 @@ function ClientProfileModal({ client, packages, staffList, currentStaff, pin, on
         <div style={{display: "flex", justifyContent: "space-between", alignItems: "flex-start"}}>
           <div>
             <h2>{client.name}</h2>
-            <p className="page-sub" style={{marginBottom: "2px"}}>{client.packageName}</p>
+            <p className="page-sub" style={{marginBottom: "2px"}}>{String(client.status || "").toLowerCase() === "new" ? "New client — no package yet" : client.packageName}</p>
             {client.phone && <p className="page-sub" style={{marginTop: 0, marginBottom: 2}}>{client.phone}</p>}
             <p className="page-sub" style={{marginTop: 0}}>
               {client.location}
@@ -2382,6 +2504,16 @@ function ClientProfileModal({ client, packages, staffList, currentStaff, pin, on
             <button className="btn-small" style={{background: "var(--grey-light)", color: "var(--grey)"}} onClick={printProfile}>Print profile</button>
           </div>
         </div>
+
+        {!inv && String(client.status || "").toLowerCase() === "new" && (
+          <div className="component-block" style={{background: "#FFFBEB"}}>
+            <div className="component-label">Confirm this new client</div>
+            <p style={{fontSize: 12, color: "var(--grey)", margin: "0 0 4px"}}>Choose their package. Nothing is owed until you do.</p>
+            <ConfirmNewClient client={client} packages={packages} pin={pin} onDone={() => { if (onUpdated) onUpdated(); }} />
+          </div>
+        )}
+
+        {!inv && <FichePanel client={client} pin={pin} />}
 
         {!inv && (client.babyName || client.babyBirthDate || client.babyBirthDetails) && (
           <div className="component-block">
@@ -2700,7 +2832,7 @@ function LinkBookingsModal({ pin, onClose, onChanged }) {
       <div className="modal-box" style={{maxWidth: 600}} onClick={e => e.stopPropagation()}>
         <h2>Link bookings to clients</h2>
         <p className="page-sub" style={{marginBottom: 14}}>
-          Each booking gets tied to its client profile, so a different spelling of the name no longer breaks the connection. This only adds a link. It never changes a price or creates a profile.
+          Each booking gets tied to its client profile, so a different spelling of the name no longer breaks the connection. Pressing the button only adds links; it never changes a price. From that moment, anyone NEW who books or fills in an intake fiche also gets a pending profile (no package, no price) that you confirm from the Today screen.
         </p>
 
         {err && <LoadError message={err} onRetry={load} />}
@@ -2822,6 +2954,7 @@ function ClientsView({ pin, currentStaff, autoOpen, onAutoOpened }) {
     .filter(c => {
       if (fStatus === "all") return true;
       const s = statusOf(c);
+      if (fStatus === "new") return s === "new";
       if (fStatus === "active") return s === "active" || s === "" || s === "confirmed";
       if (fStatus === "completed") return s === "completed" || s === "past" || s === "done";
       return true;
@@ -2912,6 +3045,7 @@ function ClientsView({ pin, currentStaff, autoOpen, onAutoOpened }) {
         </select>
         <select className="form-select" style={{flex: "1 1 120px", maxWidth: 180}} value={fStatus} onChange={e => setFStatus(e.target.value)}>
           <option value="all">Status: All</option>
+          <option value="new">New (need a package)</option>
           <option value="active">Active</option>
           <option value="completed">Completed</option>
         </select>
@@ -2947,16 +3081,18 @@ function ClientsView({ pin, currentStaff, autoOpen, onAutoOpened }) {
           <div className="client-header">
             <div>
               <div className="client-name">{c.name}</div>
-              <div className="client-services">{c.packageName}</div>
+              <div className="client-services">{statusOf(c) === "new" ? "No package yet" : c.packageName}</div>
             </div>
             <div style={{display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 4}}>
               {statusOf(c) === "completed" || statusOf(c) === "past"
                 ? <span className="badge" style={{background: "var(--grey-light)", color: "var(--grey)"}}>Completed</span>
                 : null}
               {c.location && <span className="badge">{c.location}</span>}
-              <span className={"balance-tag" + (c.balance <= 0 ? " paid" : " owed")}>
-                {c.balance <= 0 ? "Paid" : c.balance + " TND due"}
-              </span>
+              {statusOf(c) === "new"
+                ? <span className="badge" style={{background: "#FEF3CD", color: "#92400E"}}>New</span>
+                : <span className={"balance-tag" + (c.balance <= 0 ? " paid" : " owed")}>
+                    {c.balance <= 0 ? "Paid" : c.balance + " TND due"}
+                  </span>}
             </div>
           </div>
         </div>
@@ -4510,6 +4646,7 @@ function ReportsHub({ pin }) {
 function Dashboard({ staff, pin, onLogout }) {
   const [view, setView] = useState("today");
   const [clientsOpen, setClientsOpen] = useState(null);   // set by the Today banner: "link" (owner) or "import" (staff)
+  const [ficheTick, setFicheTick] = useState(0);             // bumped when the background fiche check adds new clients
   const [data, setData] = useState(null);
   const [packages, setPackages] = useState([]);
   const [staffList, setStaffList] = useState([]);
@@ -4561,6 +4698,19 @@ function Dashboard({ staff, pin, onLogout }) {
     return () => { cancelled = true; };
   }, [hasData, pin]);
 
+  // A few seconds after opening, quietly check the intake fiches for NEW people (the server does this at most
+  // once every 10 minutes and only after linking has been switched on). Never blocks anything.
+  useEffect(() => {
+    if (!hasData) return;
+    let cancelled = false;
+    const t = setTimeout(() => {
+      apiCall({ action: "syncNewFiches", pin }).then(res => {
+        if (!cancelled && res && res.success && res.created > 0) { setFicheTick(n => n + 1); loadData(); }
+      }).catch(() => {});
+    }, 6000);
+    return () => { cancelled = true; clearTimeout(t); };
+  }, [hasData, pin]);
+
   return (
     <div className="shell">
       <div className="sidebar">
@@ -4602,7 +4752,7 @@ function Dashboard({ staff, pin, onLogout }) {
       <div className="main">
         {!data && !loadError && <div className="loading">Loading dashboard...</div>}
         {!data && loadError && <LoadError message={loadError} onRetry={() => { setLoadError(""); loadData(); }} />}
-        {data && view === "today" && <TodayView pin={pin} data={data} onRefresh={loadData} onReview={() => { setClientsOpen(staff.role === "owner" ? "link" : "import"); setView("clients"); }} />}
+        {data && view === "today" && <TodayView pin={pin} data={data} onRefresh={loadData} onReview={() => { setClientsOpen(staff.role === "owner" ? "link" : "import"); setView("clients"); }} refreshKey={ficheTick} />}
         {data && view === "calendar" && <CalendarView pin={pin} currentStaff={staff} />}
         {data && view === "groups" && <GroupClassesView pin={pin} currentStaff={staff} />}
         {data && view === "messages" && <MessagesView pin={pin} />}
