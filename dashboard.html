@@ -1213,6 +1213,8 @@ function NewClientModal({ pin, packages, staffList, currentStaff, onClose, onCre
   const [location, setLocation] = useState(currentStaff ? currentStaff.location : "");
   const [assigned, setAssigned] = useState([]);
   const [saving, setSaving] = useState(false);
+  const [msg, setMsg] = useState("");
+  const [dup, setDup] = useState(null);   // an existing profile that looks like the same person
 
   const selectedPkg = packages.find(p => p.id === packageId);
   const canSave = name.trim() && phone.trim() && packageId;
@@ -1222,9 +1224,11 @@ function NewClientModal({ pin, packages, staffList, currentStaff, onClose, onCre
     setAssigned(prev => prev.includes(staffName) ? prev.filter(s => s !== staffName) : [...prev, staffName]);
   };
 
-  const save = () => {
+  const save = (force) => {
     if (!canSave) return;
     setSaving(true);
+    setMsg("");
+    setDup(null);
     apiCall({
       action: "createClient",
       pin,
@@ -1234,11 +1238,14 @@ function NewClientModal({ pin, packages, staffList, currentStaff, onClose, onCre
       packageId,
       customPrice: customPrice || "",
       location: location || (currentStaff ? currentStaff.location : ""),
-      assignedStaff: assigned.join(", ")
+      assignedStaff: assigned.join(", "),
+      force: force === true ? "1" : ""
     }).then(res => {
       setSaving(false);
       if (res.success) onCreated();
-    });
+      else if (res.duplicate) { setDup(res.existing); setMsg(res.error); }
+      else setMsg(res.error || "Could not create the client.");
+    }).catch(() => { setSaving(false); setMsg("Couldn't reach the server. Please try again."); });
   };
 
   return (
@@ -1311,9 +1318,20 @@ function NewClientModal({ pin, packages, staffList, currentStaff, onClose, onCre
           </div>
         )}
 
+        {msg && (
+          <div role="alert" style={{background: "#FEF3CD", color: "#92400E", borderRadius: 8, padding: "10px 12px", marginBottom: 12, fontSize: 13}}>
+            {msg}
+            {dup && (
+              <div style={{marginTop: 6, fontSize: 12}}>
+                Check the Clients list before adding them again. If this really is a different person, you can{" "}
+                <span style={{textDecoration: "underline", cursor: "pointer", fontWeight: 600}} onClick={() => save(true)}>create anyway</span>.
+              </div>
+            )}
+          </div>
+        )}
         <div className="modal-actions">
           <button className="btn-secondary" onClick={onClose}>Cancel</button>
-          <button className="btn-confirm" disabled={!canSave || saving} onClick={save}>
+          <button className="btn-confirm" disabled={!canSave || saving} onClick={() => save(false)}>
             {saving ? "Creating..." : "Create client"}
           </button>
         </div>
@@ -1399,22 +1417,32 @@ function MergeClientsModal({ pin, onClose, onMerged }) {
   const [picked, setPicked] = useState({});     // groupKey -> { clientId: true }
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState("");
+  const [warnings, setWarnings] = useState({ sharedPhone: [], businessNumber: [] });
+  const [loadErr, setLoadErr] = useState("");
 
   const load = () => {
+    setLoadErr("");
     apiCall({ action: "findDuplicateClients", pin }).then(res => {
       if (res.success) {
-        setGroups(res.groups);
-        // Default: oldest profile is primary, all others ticked to merge in
+        // "sure" = same phone/name; "similar" = spelled differently, needs a human look
+        const sure = (res.groups || []).map(g => ({ ...g, kind: "sure" }));
+        const similar = (res.similar || []).map(g => ({ ...g, kind: "similar" }));
+        const all = sure.concat(similar);
+        setGroups(all);
+        setWarnings({ sharedPhone: res.sharedPhone || [], businessNumber: res.businessNumber || [] });
+        // Sure matches: oldest profile kept, the rest pre-ticked. Similar ones: NOTHING pre-ticked.
         const p = {}, k = {};
-        res.groups.forEach(g => {
+        all.forEach(g => {
           p[g.key] = g.clients[0].id;
           k[g.key] = {};
-          g.clients.slice(1).forEach(c => { k[g.key][c.id] = true; });
+          if (g.kind === "sure") g.clients.slice(1).forEach(c => { k[g.key][c.id] = true; });
         });
         setPrimary(p);
         setPicked(k);
+      } else {
+        setLoadErr(res.error || "Couldn't look for duplicates.");
       }
-    });
+    }).catch(() => setLoadErr("Couldn't reach the server. Please try again."));
   };
   useEffect(() => { load(); }, []);
 
@@ -1453,17 +1481,24 @@ function MergeClientsModal({ pin, onClose, onMerged }) {
           Profiles that look like the same person (matched by phone, or by name when there's no phone). Choose which profile to keep — everything from the others (appointments, payments, charges, payment plans) moves onto it.
         </p>
 
-        {msg && <div style={{background: "var(--ok-bg)", color: "var(--ok)", borderRadius: 8, padding: "8px 12px", marginBottom: 12, fontSize: 12}}>{msg}</div>}
+        {msg && (/^Merged/.test(msg)
+          ? <div style={{background: "var(--ok-bg)", color: "var(--ok)", borderRadius: 8, padding: "8px 12px", marginBottom: 12, fontSize: 12}}>{msg}</div>
+          : <div role="alert" style={{background: "#FEF3CD", color: "#92400E", borderRadius: 8, padding: "8px 12px", marginBottom: 12, fontSize: 12}}>{msg}</div>)}
 
-        {!groups && <div className="loading">Looking for duplicates...</div>}
+        {loadErr && <LoadError message={loadErr} onRetry={load} />}
+        {!groups && !loadErr && <div className="loading">Looking for duplicates...</div>}
         {groups && groups.length === 0 && (
           <p style={{fontSize: 13, color: "var(--grey)"}}>No duplicate profiles found.</p>
         )}
 
+        {groups && groups.some(g => g.kind === "similar") && groups.some(g => g.kind === "sure") && (
+          <div style={{fontSize: 12, color: "var(--grey)", margin: "4px 0 8px"}}>Sure matches first (same phone or exact same name), then names that are only spelled differently.</div>
+        )}
+
         {groups && groups.map(g => (
-          <div className="component-block" key={g.key}>
+          <div className="component-block" key={g.key} style={g.kind === "similar" ? {background: "#FFFBEB"} : undefined}>
             <div className="component-label">
-              {g.clients[0].name} — {g.clients.length} profiles (matched on {g.matchedOn})
+              {g.clients[0].name} — {g.clients.length} profiles ({g.kind === "similar" ? "spelled differently — check carefully, nothing is pre-selected" : "matched on " + g.matchedOn})
             </div>
             {g.clients.map(c => (
               <div className="ledger-row" key={c.id} style={{alignItems: "center"}}>
@@ -1496,6 +1531,29 @@ function MergeClientsModal({ pin, onClose, onMerged }) {
             </button>
           </div>
         ))}
+
+        {warnings.sharedPhone.length > 0 && (
+          <div className="component-block" style={{background: "#FEF3CD"}}>
+            <div className="component-label">Same phone number, different names — probably NOT the same person</div>
+            <p style={{fontSize: 12, color: "#92400E", margin: "4px 0 8px"}}>
+              These are not offered for merging. If one number was typed wrongly, correct it in that profile and they will stop appearing here.
+            </p>
+            {warnings.sharedPhone.map(w => (
+              <div key={w.key} style={{fontSize: 13, padding: "4px 0"}}>{w.clients.map(c => c.name).join("  ·  ")}</div>
+            ))}
+          </div>
+        )}
+        {warnings.businessNumber.length > 0 && (
+          <div className="component-block" style={{background: "#FEF3CD"}}>
+            <div className="component-label">Profiles that have your business number instead of the client's</div>
+            <p style={{fontSize: 12, color: "#92400E", margin: "4px 0 8px"}}>
+              Your own number (the one printed on invoices) can't identify a client, so these are ignored when looking for duplicates. Open each profile and enter the client's own number.
+            </p>
+            {warnings.businessNumber.map(c => (
+              <div key={c.id} style={{fontSize: 13, padding: "4px 0"}}>{c.name}</div>
+            ))}
+          </div>
+        )}
 
         <p style={{fontSize: 11, color: "var(--grey)", marginTop: 10}}>
           Merging can't be undone. The kept profile gains all the history; the others are removed. Any different packages they had are noted on the kept profile.
@@ -2029,12 +2087,48 @@ function ClientProfileModal({ client, packages, staffList, currentStaff, pin, on
     });
   };
 
-  const generateInvoice = () => {
+  // The invoice covers the package PLUS any add-on services. Nothing records what was invoiced
+  // before, so when add-ons exist the user ticks the lines for THIS invoice (e.g. untick the
+  // package if it was already invoiced). invOpts = { pkg: bool, ch: { chargeId: bool } }.
+  const [invOpts, setInvOpts] = useState(null);
+  const [lineMsg, setLineMsg] = useState("");   // messages about the tick-boxes / preparing the invoice
+
+  const requestInvoice = (opts) => {
     setGenerating(true);
-    apiCall({ action: "generateClientInvoiceData", pin, clientId: client.id }).then(res => {
+    setLineMsg("");
+    const params = { action: "generateClientInvoiceData", pin, clientId: client.id };
+    if (opts) {
+      params.includePackage = opts.pkg ? "1" : "0";
+      params.chargeIds = JSON.stringify(Object.keys(opts.ch).filter(id => opts.ch[id]));
+    }
+    apiCall(params).then(res => {
       setGenerating(false);
-      if (res.success) setInv(res);
-    });
+      if (res.success) {
+        setInv(res);
+        const av = res.available;
+        if (av) {
+          setInvOpts({
+            pkg: !!av.package.included,
+            ch: av.charges.reduce((m, c) => { m[c.id] = !!c.included; return m; }, {})
+          });
+        }
+      } else {
+        setLineMsg(res.error || "Could not prepare the invoice.");
+      }
+    }).catch(() => { setGenerating(false); setLineMsg("Couldn't reach the server. Please try again."); });
+  };
+
+  const generateInvoice = () => requestInvoice(null);
+
+  const toggleInvLine = (kind, id) => {
+    if (!invOpts) return;
+    const next = { pkg: invOpts.pkg, ch: { ...invOpts.ch } };
+    if (kind === "pkg") next.pkg = !next.pkg; else next.ch[id] = !next.ch[id];
+    if (!next.pkg && !Object.keys(next.ch).some(k => next.ch[k])) {
+      setLineMsg("Keep at least one line ticked — an invoice needs something on it.");
+      return;
+    }
+    requestInvoice(next);
   };
 
   const saveAndPrint = () => {
@@ -2299,16 +2393,38 @@ function ClientProfileModal({ client, packages, staffList, currentStaff, pin, on
             <button className="btn-small" onClick={generateInvoice} disabled={generating}>
               {generating ? "Preparing..." : "Generate invoice for " + client.name}
             </button>
+            {lineMsg && <p role="alert" style={{fontSize: 12, color: "var(--magenta-dark)", marginTop: 8}}>{lineMsg}</p>}
           </div>
         )}
 
         {inv && (
           <React.Fragment>
             <div style={{display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 14}}>
-              <span style={{fontSize: 13, color: "var(--magenta-dark)", cursor: "pointer", textDecoration: "underline"}} onClick={() => setInv(null)}>
+              <span style={{fontSize: 13, color: "var(--magenta-dark)", cursor: "pointer", textDecoration: "underline"}} onClick={() => { setInv(null); setInvOpts(null); setNote(""); setLineMsg(""); }}>
                 ‹ Back to profile
               </span>
             </div>
+            {inv.available && inv.available.charges.length > 0 && invOpts && (
+              <div className="component-block" style={{marginBottom: 12, opacity: generating ? 0.6 : 1}}>
+                <div className="component-label">Lines on this invoice</div>
+                <label style={{display: "flex", alignItems: "center", gap: 8, cursor: "pointer", padding: "4px 0", fontSize: 13}}>
+                  <input type="checkbox" checked={invOpts.pkg} disabled={generating} onChange={() => toggleInvLine("pkg")} />
+                  <span style={{flex: 1}}>{inv.available.package.description} (package)</span>
+                  <span>{inv.available.package.amount} TND</span>
+                </label>
+                {inv.available.charges.map(c => (
+                  <label key={c.id} style={{display: "flex", alignItems: "center", gap: 8, cursor: "pointer", padding: "4px 0", fontSize: 13}}>
+                    <input type="checkbox" checked={!!invOpts.ch[c.id]} disabled={generating} onChange={() => toggleInvLine("ch", c.id)} />
+                    <span style={{flex: 1}}>{c.description}{c.date ? " · " + c.date : ""}</span>
+                    <span>{c.amount} TND</span>
+                  </label>
+                ))}
+                {lineMsg && <p role="alert" style={{fontSize: 12, color: "var(--magenta-dark)", margin: "6px 0 0"}}>{lineMsg}</p>}
+                <p style={{fontSize: 11, color: "var(--grey)", margin: "6px 0 0"}}>
+                  Untick anything you've already invoiced before, so it isn't billed twice.
+                </p>
+              </div>
+            )}
             <div className="invoice-controls">
               <div className="row">
                 <label>Invoice No.</label>
@@ -3032,6 +3148,9 @@ function WeeklySummaryView({ pin }) {
   const [endDate, setEndDate] = useState(addDays(toInputStr(getMonday(new Date())), 6));
   const [exporting, setExporting] = useState(false);
   const [exportNote, setExportNote] = useState("");
+  const [priceEdit, setPriceEdit] = useState(null);   // { id, text } while typing a price for a no-charge line
+  const [priceBusy, setPriceBusy] = useState(false);
+  const [priceMsg, setPriceMsg] = useState("");
 
   useEffect(() => {
     setLoading(true);
@@ -3061,6 +3180,30 @@ function WeeklySummaryView({ pin }) {
   const selectedTotal = selectedList.reduce((s, li) => s + (li.base || 0), 0);
 
   const toggle = (id) => setSelected(prev => ({ ...prev, [id]: !prev[id] }));
+
+  // A booking with no price can never reach an invoice or Reports. This saves a price onto the
+  // booking itself (owner only; never overwrites an existing price) so every screen agrees.
+  const savePrice = (li) => {
+    const price = parseFloat(priceEdit && priceEdit.text);
+    if (!(price > 0)) { setPriceMsg("Enter a price greater than 0."); return; }
+    setPriceBusy(true);
+    setPriceMsg("");
+    apiCall({ action: "setBookingPrice", pin, bookingId: li.bookingId, basePrice: String(price) }).then(res => {
+      setPriceBusy(false);
+      if (res.success) {
+        setSummary(prev => prev && ({
+          ...prev,
+          chargeableCount: prev.chargeableCount + 1,
+          lineItems: prev.lineItems.map(x => x.id === li.id ? { ...x, base: res.basePrice, total: res.total, hasCharge: true } : x)
+        }));
+        setSelected(prev => ({ ...prev, [li.id]: true }));
+        setPriceEdit(null);
+        setPriceMsg("Price saved on the booking (" + res.basePrice + " TND). It now counts in Reports too.");
+      } else {
+        setPriceMsg(res.error || "Could not save the price.");
+      }
+    }).catch(() => { setPriceBusy(false); setPriceMsg("Couldn't reach the server. Please try again."); });
+  };
 
   const generateInvoice = () => {
     if (selectedList.length === 0) { setNote("Select at least one item with a charge to invoice."); return; }
@@ -3173,17 +3316,34 @@ function WeeklySummaryView({ pin }) {
           )}
 
           {summary.lineItems.map((li) => (
-            <div className="divers-row" key={li.id} style={{alignItems: "center", opacity: li.hasCharge ? 1 : 0.55}}>
+            <div className="divers-row" key={li.id} style={{alignItems: "center", opacity: (li.hasCharge || (priceEdit && priceEdit.id === li.id)) ? 1 : 0.55}}>
               <label style={{display: "flex", alignItems: "center", gap: 8, cursor: "pointer", flex: 1}}>
                 <input type="checkbox" checked={!!selected[li.id]} onChange={() => toggle(li.id)} />
                 <span>{li.date} — {li.clientName} — {li.service}{li.packageLabel ? " (" + li.packageLabel + ")" : ""}</span>
               </label>
               <span style={{whiteSpace: "nowrap"}}>
-                {li.hasCharge ? li.base + " TND" : <span style={{fontSize: 11, color: "var(--grey)"}}>no charge</span>}
+                {li.hasCharge ? li.base + " TND" : (priceEdit && priceEdit.id === li.id) ? (
+                  <span style={{display: "inline-flex", alignItems: "center", gap: 4}}>
+                    <input type="number" min="0" step="0.001" autoFocus placeholder="price" value={priceEdit.text}
+                      onChange={e => setPriceEdit({ id: li.id, text: e.target.value })}
+                      style={{width: 78, padding: "3px 6px", fontSize: 12, border: "1px solid var(--grey-light)", borderRadius: 6}} />
+                    <span style={{fontSize: 11}}>TND</span>
+                    <button className="btn-small" disabled={priceBusy} onClick={() => savePrice(li)}>{priceBusy ? "..." : "Save"}</button>
+                    <span style={{fontSize: 11, color: "var(--grey)", cursor: "pointer", textDecoration: "underline"}} onClick={() => { setPriceEdit(null); setPriceMsg(""); }}>cancel</span>
+                  </span>
+                ) : (
+                  <span style={{fontSize: 11, color: "var(--grey)"}}>
+                    no charge
+                    {li.bookingId && (
+                      <span> · <span style={{textDecoration: "underline", cursor: "pointer", color: "var(--magenta-dark)"}} onClick={() => { setPriceEdit({ id: li.id, text: "" }); setPriceMsg(""); }}>set price</span></span>
+                    )}
+                  </span>
+                )}
               </span>
             </div>
           ))}
 
+          {priceMsg && <p role="status" style={{fontSize: 12, color: "var(--magenta-dark)", margin: "8px 0 0"}}>{priceMsg}</p>}
           <div className="divers-total">
             <span>Selected total (taxable)</span>
             <span>{selectedTotal.toFixed(3)} TND</span>
@@ -3298,6 +3458,112 @@ function StatsView({ pin }) {
   );
 }
 
+// Guesses the package from a booking's service name so the profile form arrives pre-filled.
+function guessPackageId(service, packages) {
+  const s = String(service || "").toLowerCase();
+  const has = id => (packages || []).some(p => p.id === id);
+  let id = null;
+  if (s.indexOf("joyful birth method") !== -1) id = "jbm";
+  else if (s.indexOf("childbirth") !== -1) id = "cbe";
+  else if (s.indexOf("breastfeeding") !== -1 || s.indexOf("lactation") !== -1) id = "breastfeeding";
+  else if (s.indexOf("postpartum") !== -1) id = "postpartum";
+  else if (s.indexOf("pump") !== -1 || s.indexOf("rental") !== -1) id = "pump";
+  else if (s.indexOf("exercise") !== -1) id = "exercise";
+  return id && has(id) ? id : null;
+}
+
+// Shown in the calendar's appointment box when a booking has no client profile yet.
+// Online bookings never create profiles, so this turns one into a profile in one step.
+function CreateProfileFromBooking({ appt, packages, currentStaff, pin, onCreated, onOpenExisting }) {
+  const [open, setOpen] = useState(false);
+  const [name, setName] = useState(appt.clientName || "");
+  const [phone, setPhone] = useState(String(appt.phone || ""));
+  const [email, setEmail] = useState(String(appt.email || ""));
+  const [packageId, setPackageId] = useState(guessPackageId(appt.service, packages) || "");
+  const loc = String(appt.location || "");
+  const staffLoc = currentStaff && (currentStaff.location === "Tunis" || currentStaff.location === "Sousse") ? currentStaff.location : "Sousse";
+  const [location, setLocation] = useState(/tunis/i.test(loc) ? "Tunis" : /sousse/i.test(loc) ? "Sousse" : staffLoc);
+  const [busy, setBusy] = useState(false);
+  const [msg, setMsg] = useState("");
+  const [dup, setDup] = useState(null);
+
+  const submit = (force) => {
+    if (!name.trim() || !packageId) { setMsg("Add a name and choose a package."); return; }
+    setBusy(true);
+    setMsg("");
+    setDup(null);
+    apiCall({
+      action: "createClient", pin,
+      clientName: name.trim(), phone: phone.trim(), email: email.trim(),
+      packageId, customPrice: "", location, assignedStaff: "",
+      force: force === true ? "1" : ""
+    }).then(res => {
+      setBusy(false);
+      if (res.success) onCreated(res.clientId, name.trim());
+      else if (res.duplicate) { setDup(res.existing); setMsg(res.error); }
+      else setMsg(res.error || "Could not create the profile.");
+    }).catch(() => { setBusy(false); setMsg("Couldn't reach the server. Please try again."); });
+  };
+
+  if (!open) {
+    return (
+      <div style={{marginTop: 12}}>
+        <p style={{fontSize: 12, color: "var(--grey)", margin: "0 0 8px"}}>
+          No client profile yet for this booking.
+        </p>
+        <button className="btn-confirm" onClick={() => setOpen(true)}>Create client profile</button>
+      </div>
+    );
+  }
+  return (
+    <div className="component-block" style={{marginTop: 12}}>
+      <div className="component-label">Create client profile</div>
+      <div className="form-group">
+        <label className="form-label">Client name</label>
+        <input className="form-input" value={name} onChange={e => setName(e.target.value)} />
+      </div>
+      <div className="form-group">
+        <label className="form-label">Phone{phone ? "" : " (none on this booking — add it so future bookings link up)"}</label>
+        <input className="form-input" value={phone} onChange={e => setPhone(e.target.value)} />
+      </div>
+      <div className="form-group">
+        <label className="form-label">Email (optional)</label>
+        <input className="form-input" value={email} onChange={e => setEmail(e.target.value)} />
+      </div>
+      <div className="form-group">
+        <label className="form-label">Package</label>
+        <select className="form-select" value={packageId} onChange={e => setPackageId(e.target.value)}>
+          <option value="">Choose a package…</option>
+          {(packages || []).map(p => <option key={p.id} value={p.id}>{p.name} — {p.price} TND</option>)}
+        </select>
+      </div>
+      <div className="form-group">
+        <label className="form-label">Location</label>
+        <select className="form-select" value={location} onChange={e => setLocation(e.target.value)}>
+          <option value="Sousse">Sousse</option>
+          <option value="Tunis">Tunis</option>
+        </select>
+      </div>
+      {msg && (
+        <div role="alert" style={{background: "#FEF3CD", color: "#92400E", borderRadius: 8, padding: "8px 10px", marginBottom: 10, fontSize: 12}}>
+          {msg}
+          {dup && (
+            <div style={{marginTop: 6}}>
+              <span style={{textDecoration: "underline", cursor: "pointer", fontWeight: 600}} onClick={() => onOpenExisting(dup.id)}>Open that profile</span>
+              {" · "}
+              <span style={{textDecoration: "underline", cursor: "pointer"}} onClick={() => submit(true)}>Create anyway</span>
+            </div>
+          )}
+        </div>
+      )}
+      <div className="modal-actions" style={{marginTop: 4}}>
+        <button className="btn-secondary" onClick={() => { setOpen(false); setMsg(""); setDup(null); }}>Cancel</button>
+        <button className="btn-confirm" disabled={busy} onClick={() => submit(false)}>{busy ? "Creating..." : "Create profile"}</button>
+      </div>
+    </div>
+  );
+}
+
 function CalendarView({ pin, currentStaff }) {
   const now = new Date();
   const [month, setMonth] = useState(now.getMonth() + 1); // 1-12
@@ -3346,6 +3612,24 @@ function CalendarView({ pin, currentStaff }) {
   const openProfileFor = (name) => {
     const match = clients.find(c => c.name.toLowerCase() === String(name || "").toLowerCase());
     if (match) setProfileClient(match);
+  };
+
+  // After a profile is created from a booking: reload the client list (the cache was cleared by
+  // the save) and open the new profile.
+  const handleProfileCreated = (clientId, name) => {
+    apiRead({ action: "getClients", pin }, (res, isFresh) => {
+      if (!res.success || !isFresh) return;
+      setClients(res.clients);
+      if (res.packages) setPackages(res.packages);
+      const c = res.clients.find(x => x.id === clientId) || res.clients.find(x => x.name === name);
+      setSelectedAppt(null);
+      if (c) setProfileClient(c);
+    });
+  };
+  const handleOpenExisting = (clientId) => {
+    const c = clients.find(x => x.id === clientId);
+    setSelectedAppt(null);
+    if (c) setProfileClient(c);
   };
 
   const shift = (dir) => {
@@ -3470,10 +3754,20 @@ function CalendarView({ pin, currentStaff }) {
               <button className="btn-confirm" style={{marginTop: 12}} onClick={() => { openProfileFor(selectedAppt.clientName); setSelectedAppt(null); }}>
                 View client profile
               </button>
-            ) : (
+            ) : selectedAppt.isGroup ? (
               <p style={{fontSize: 12, color: "var(--grey)", marginTop: 12}}>
-                No matching client profile (this may be a one-off booking or a name that differs from the profile).
+                Group class — each client keeps their own profile.
               </p>
+            ) : (
+              <CreateProfileFromBooking
+                key={(selectedAppt.bookingId || "") + selectedAppt.date + selectedAppt.time + selectedAppt.clientName}
+                appt={selectedAppt}
+                packages={packages}
+                currentStaff={currentStaff}
+                pin={pin}
+                onCreated={handleProfileCreated}
+                onOpenExisting={handleOpenExisting}
+              />
             )}
             <button className="btn-secondary" style={{marginTop: 8}} onClick={() => setSelectedAppt(null)}>Close</button>
           </div>
