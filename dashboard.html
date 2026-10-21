@@ -2941,15 +2941,24 @@ function LinkBookingsModal({ pin, onClose, onChanged }) {
 function RecordPaymentsModal({ clients, pin, onClose, onChanged }) {
   const open = (clients || []).filter(c => String(c.status || "").toLowerCase() !== "new" && Number(c.balance) > 0.0005)
     .sort((a, b) => String(a.name).localeCompare(String(b.name)));
-  const [rows, setRows] = useState(() => open.map(c => ({ id: c.id, name: c.name, pkg: c.packageName, owed: Number(c.balance), amount: String(Number(c.balance)), date: "", on: true })));
+  const [rows, setRows] = useState(() => open.map(c => ({ id: c.id, name: c.name, pkg: c.packageName, owed: Number(c.balance), amount: String(Number(c.balance)), date: "", src: "", on: true })));
   const [allDate, setAllDate] = useState("");
+  const [dateNote, setDateNote] = useState("Looking up each client's service date...");
+  // Pre-fill each payment with the date of that client's service (the owner can still change it).
+  useEffect(() => {
+    apiCall({ action: "getPaymentDateSuggestions", pin }).then(res => {
+      if (!res.success) { setDateNote("Couldn't look up service dates. Enter each date yourself."); return; }
+      setRows(rs => rs.map(r => (!r.date && res.suggestions && res.suggestions[r.id]) ? { ...r, date: res.suggestions[r.id].date, src: res.suggestions[r.id].source } : r));
+      setDateNote("");
+    }).catch(() => setDateNote("Couldn't look up service dates. Enter each date yourself."));
+  }, []);
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState("");
   const [done, setDone] = useState(null);
   const today = new Date().toISOString().split("T")[0];
 
   const patch = (id, p) => setRows(rs => rs.map(r => r.id === id ? { ...r, ...p } : r));
-  const applyAll = () => { if (allDate) setRows(rs => rs.map(r => ({ ...r, date: allDate }))); };
+  const applyAll = () => { if (allDate) setRows(rs => rs.map(r => ({ ...r, date: allDate, src: "date you chose" }))); };
   const chosen = rows.filter(r => r.on);
   const ready = chosen.filter(r => r.date && Number(r.amount) > 0 && r.date <= today);
   const readyTotal = ready.reduce((s, r) => s + (Number(r.amount) || 0), 0);
@@ -2981,16 +2990,17 @@ function RecordPaymentsModal({ clients, pin, onClose, onChanged }) {
         ) : (
           <React.Fragment>
             <p className="page-sub" style={{marginBottom: 10}}>
-              These clients show a balance, but you've told me they've all paid in cash. Enter the <strong>real date the money arrived</strong> for each: that date decides which month it counts in for Reports and TVA. Each is recorded as one cash payment.
+              These clients show a balance, but they've all paid in cash. Each payment is dated to that client's <strong>service date</strong> (the latest service that has happened), already filled in below. Check them, and change any that are wrong: the date decides which month the money counts in for Reports and TVA. Each is recorded as one cash payment.
             </p>
             {open.length === 0 && <p style={{fontSize: 13, color: "var(--grey)"}}>No client has an open balance. Nothing to record.</p>}
             {open.length > 0 && (
               <React.Fragment>
                 <div style={{display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap", marginBottom: 10}}>
-                  <span style={{fontSize: 12, color: "var(--grey)"}}>Same date for everyone:</span>
+                  <span style={{fontSize: 12, color: "var(--grey)"}}>Or one date for everyone:</span>
                   <input className="form-input" type="date" max={today} style={{width: 160}} value={allDate} onChange={e => setAllDate(e.target.value)} />
                   <button className="btn-small" disabled={!allDate} onClick={applyAll}>Fill all dates</button>
                 </div>
+                {dateNote && <p style={{fontSize: 12, color: "var(--grey)", margin: "0 0 8px"}}>{dateNote}</p>}
                 <div style={{maxHeight: 340, overflowY: "auto", border: "1px solid var(--grey-light)", borderRadius: 8}}>
                   {rows.map(r => (
                     <div key={r.id} style={{display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap", padding: "8px 10px", borderBottom: "1px solid var(--grey-light)", opacity: r.on ? 1 : 0.5}}>
@@ -2998,9 +3008,10 @@ function RecordPaymentsModal({ clients, pin, onClose, onChanged }) {
                       <div style={{flex: "1 1 160px", minWidth: 140}}>
                         <div style={{fontSize: 13, fontWeight: 600}}>{r.name}</div>
                         <div style={{fontSize: 11, color: "var(--grey)"}}>{r.pkg} · owed {r.owed} TND</div>
+                        {r.src && <div style={{fontSize: 11, color: "var(--grey)"}}>Date: {r.src}</div>}
                       </div>
                       <input className="form-input" type="number" min="0" step="0.001" style={{width: 90}} value={r.amount} onChange={e => patch(r.id, { amount: e.target.value })} />
-                      <input className="form-input" type="date" max={today} style={{width: 150}} value={r.date} onChange={e => patch(r.id, { date: e.target.value })} />
+                      <input className="form-input" type="date" max={today} style={{width: 150}} value={r.date} onChange={e => patch(r.id, { date: e.target.value, src: "date you chose" })} />
                     </div>
                   ))}
                 </div>
