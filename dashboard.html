@@ -1592,189 +1592,235 @@ function ComponentTracker({ client, component, pin, onUpdated }) {
   );
 }
 
+// Guided "same person?" screen: one pair at a time, two cards side by side, three plain buttons.
+// Nothing changes until "Same person" is pressed; "Different people" is remembered so the pair never comes back.
 function MergeClientsModal({ pin, onClose, onMerged }) {
-  const [groups, setGroups] = useState(null);
-  const [primary, setPrimary] = useState({});   // groupKey -> clientId
-  const [picked, setPicked] = useState({});     // groupKey -> { clientId: true }
+  const [queue, setQueue] = useState(null);
+  const [warnings, setWarnings] = useState({ sharedPhone: [], businessNumber: [] });
+  const [idx, setIdx] = useState(0);
+  const [keep, setKeep] = useState("");
+  const [include, setInclude] = useState({});
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState("");
-  const [warnings, setWarnings] = useState({ sharedPhone: [], businessNumber: [] });
+  const [stats, setStats] = useState({ merged: 0, separate: 0, skipped: 0 });
+  const [followUp, setFollowUp] = useState(null);   // after a merge that needs a quick check: { name, payments, days }
   const [loadErr, setLoadErr] = useState("");
+
+  // the more complete profile is the one to keep: has a phone, a full name, payments, activity
+  const score = (c) => (c.phone ? 3 : 0) + String(c.name || "").trim().split(/\s+/).length + ((c.paid || 0) > 0 ? 1 : 0) + Math.min((c.activity || []).length, 3) * 0.2;
+  const keeperOf = (g) => g.clients.slice().sort((x, y) => score(y) - score(x))[0].id;
+  const startGroup = (g) => {
+    if (!g) return;
+    setKeep(keeperOf(g));
+    const inc = {};
+    g.clients.forEach(c => { inc[c.id] = g.kind === "sure" || g.clients.length === 2; });
+    setInclude(inc);
+    setMsg("");
+  };
 
   const load = () => {
     setLoadErr("");
     apiCall({ action: "findDuplicateClients", pin }).then(res => {
-      if (res.success) {
-        // "sure" = same phone/name; "similar" = spelled differently, needs a human look
-        const sure = (res.groups || []).map(g => ({ ...g, kind: "sure" }));
-        const similar = (res.similar || []).map(g => ({ ...g, kind: "similar" }));
-        const all = sure.concat(similar);
-        setGroups(all);
-        setWarnings({ sharedPhone: res.sharedPhone || [], businessNumber: res.businessNumber || [] });
-        // Sure matches: oldest profile kept, the rest pre-ticked. Similar ones: NOTHING pre-ticked.
-        const p = {}, k = {};
-        const fuller = (g) => g.clients.slice().sort((a, b) => (String(b.name).trim().split(/\s+/).length - String(a.name).trim().split(/\s+/).length) || ((b.phone ? 1 : 0) - (a.phone ? 1 : 0)))[0].id;
-        all.forEach(g => {
-          p[g.key] = (g.kind === "similar" && /^first name/.test(g.matchedOn || "")) ? fuller(g) : g.clients[0].id;
-          k[g.key] = {};
-          if (g.kind === "sure") g.clients.slice(1).forEach(c => { k[g.key][c.id] = true; });
-        });
-        setPrimary(p);
-        setPicked(k);
-      } else {
-        setLoadErr(res.error || "Couldn't look for duplicates.");
-      }
+      if (!res.success) { setLoadErr(res.error || "Couldn't look for duplicates."); return; }
+      const sure = (res.groups || []).map(g => ({ ...g, kind: "sure" }));
+      const similar = (res.similar || []).map(g => ({ ...g, kind: "similar" }));
+      const all = sure.concat(similar);
+      setQueue(all);
+      setIdx(0);
+      setWarnings({ sharedPhone: res.sharedPhone || [], businessNumber: res.businessNumber || [] });
+      startGroup(all[0]);
     }).catch(() => setLoadErr("Couldn't reach the server. Please try again."));
   };
   useEffect(() => { load(); }, []);
 
-  const toggle = (gk, id) => setPicked(prev => ({ ...prev, [gk]: { ...prev[gk], [id]: !(prev[gk] || {})[id] } }));
+  const g = queue && queue[idx];
+  const total = queue ? queue.length : 0;
+  const goNext = () => {
+    const n = idx + 1;
+    setIdx(n);
+    setFollowUp(null);
+    if (queue && queue[n]) startGroup(queue[n]);
+  };
 
-  const mergeGroup = (g) => {
-    const primaryId = primary[g.key];
-    const mergeIds = Object.keys(picked[g.key] || {}).filter(id => picked[g.key][id] && id !== primaryId);
-    if (!primaryId || mergeIds.length === 0) { setMsg("Pick a profile to keep, and at least one to merge into it."); return; }
-    setBusy(true);
-    setMsg("");
-    apiCall({
-      action: "mergeClients", pin,
-      primaryId,
-      mergeIds: JSON.stringify(mergeIds)
-    }).then(res => {
+  // plain-language reasons why these might be the same person
+  const reasons = (grp) => {
+    const out = [];
+    const m = grp.matchedOn || "";
+    if (m === "phone") out.push("They have the same phone number.");
+    else if (m === "name") out.push("They have exactly the same name.");
+    else if (m === "similar name") out.push("The names are spelled slightly differently.");
+    else if (/^first name/.test(m)) out.push("One profile has just a first name; the other has the same first name with a last name.");
+    if (grp.phoneTypo) out.push("Their phone numbers are one digit apart, so it's probably a typing mistake.");
+    else if (grp.phonesDiffer) out.push("Their phone numbers are different, so only merge them if you know it's the same person (for example someone who gave you two numbers).");
+    (grp.evidence || []).slice(0, 2).forEach(ev => out.push("On " + ev.date + " both have something: " + grp.clients.filter(c => ev.byClient[c.id]).map(c => c.name + " (" + ev.byClient[c.id].join(", ") + ")").join(" and ") + "."));
+    if (!(grp.evidence || []).length && /^first name/.test(m)) out.push("Nothing else connects them (no booking, fiche or payment on the same day), so it is only a guess.");
+    return out;
+  };
+
+  const merge = () => {
+    const mergeIds = g.clients.filter(c => c.id !== keep && include[c.id]).map(c => c.id);
+    if (mergeIds.length === 0) { setMsg("Tick at least one profile to merge in, or choose Different people."); return; }
+    setBusy(true); setMsg("");
+    const kept = g.clients.find(c => c.id === keep);
+    const needsCheck = (g.bothPaid || (g.sameDayBookings && g.sameDayBookings.length > 0));
+    apiCall({ action: "mergeClients", pin, primaryId: keep, mergeIds: JSON.stringify(mergeIds) }).then(res => {
+      if (!(res && res.success)) { setBusy(false); setMsg((res && res.error) || "Could not merge."); return; }
+      setStats(st => ({ ...st, merged: st.merged + 1 }));
+      if (onMerged) onMerged();
+      if (!needsCheck) { setBusy(false); setMsg("Merged into " + kept.name + "."); goNext(); return; }
+      // after merging, show the combined payments so a double-paid visit can be fixed right here
+      apiCall({ action: "getClientLedger", pin, clientId: keep }).then(led => {
+        setBusy(false);
+        setFollowUp({ name: kept.name, clientId: keep, payments: (led && led.payments) || [], price: led && led.packagePrice, days: g.sameDayBookings || [] });
+      }).catch(() => { setBusy(false); setFollowUp({ name: kept.name, clientId: keep, payments: [], price: 0, days: g.sameDayBookings || [] }); });
+    }).catch(() => { setBusy(false); setMsg("Couldn't reach the server. Check Clients before trying again."); });
+  };
+
+  const different = () => {
+    setBusy(true); setMsg("");
+    apiCall({ action: "dismissDuplicatePair", pin, ids: JSON.stringify(g.clients.map(c => c.id)) }).then(res => {
       setBusy(false);
-      if (res && res.success) {
-        const m = res.moved || {};
-        setMsg("Merged " + res.merged + " profile" + (res.merged !== 1 ? "s" : "") +
-          " — moved " + (m.appointments || 0) + " appointments, " + (m.payments || 0) + " payments, " +
-          (m.charges || 0) + " charges.");
-        load();
-        if (onMerged) onMerged();
-      } else {
-        setMsg((res && res.error) ? res.error : "Could not merge.");
-      }
+      if (res && res.success) { setStats(st => ({ ...st, separate: st.separate + 1 })); goNext(); }
+      else setMsg((res && res.error) || "Could not save that.");
     }).catch(() => { setBusy(false); setMsg("Couldn't reach the server."); });
   };
+  const skip = () => { setStats(st => ({ ...st, skipped: st.skipped + 1 })); goNext(); };
+
+  const removePayment = (id) => {
+    if (!window.confirm("Remove this payment?")) return;
+    apiCall({ action: "deletePayment", pin, paymentId: id }).then(() => {
+      setFollowUp(f => f ? { ...f, payments: f.payments.filter(p => p.id !== id) } : f);
+      if (onMerged) onMerged();
+    }).catch(() => setMsg("Couldn't reach the server."));
+  };
+
+  const card = (c) => {
+    const isKeep = keep === c.id;
+    return (
+      <div key={c.id} style={{flex: "1 1 230px", minWidth: 220, border: isKeep ? "2px solid var(--magenta)" : "1.5px solid var(--grey-light)", borderRadius: 12, padding: "12px 14px", background: isKeep ? "#FDF2F8" : "#fff"}}>
+        <div style={{fontSize: 11, fontWeight: 700, letterSpacing: "0.05em", color: isKeep ? "var(--magenta-dark)" : "var(--grey)"}}>{isKeep ? "KEEP THIS ONE" : (include[c.id] ? "MERGE INTO THE OTHER" : "LEAVE ALONE")}</div>
+        <div style={{fontSize: 17, fontWeight: 600, margin: "4px 0 2px"}}>{c.name}</div>
+        <div style={{fontSize: 13}}>{c.phone ? "Phone: " + c.phone : <span style={{color: "var(--grey)"}}>No phone number</span>}</div>
+        <div style={{fontSize: 13}}>{c.packageName || c.packageId || "No package"}</div>
+        <div style={{fontSize: 13}}>Paid: {c.paid || 0} TND</div>
+        {c.activity && c.activity.length > 0 && (
+          <div style={{fontSize: 12, color: "var(--grey)", marginTop: 4}}>
+            {c.activity.slice(0, 4).map((x, i) => <div key={i}>{x.date} · {x.kinds.join(", ")}</div>)}
+          </div>
+        )}
+        {!isKeep && <div style={{marginTop: 8}}><span style={{fontSize: 12, color: "var(--magenta-dark)", textDecoration: "underline", cursor: "pointer"}} onClick={() => setKeep(c.id)}>Keep this one instead</span></div>}
+        {!isKeep && g.clients.length > 2 && (
+          <label style={{display: "flex", alignItems: "center", gap: 6, fontSize: 12, marginTop: 6, cursor: "pointer"}}>
+            <input type="checkbox" checked={!!include[c.id]} onChange={e => setInclude(prev => ({ ...prev, [c.id]: e.target.checked }))} /> Same person
+          </label>
+        )}
+      </div>
+    );
+  };
+
+  const keptName = g && (g.clients.find(c => c.id === keep) || {}).name;
 
   return (
     <div className="modal-overlay" onClick={onClose}>
-      <div className="modal-box" onClick={e => e.stopPropagation()} style={{maxWidth: 560}}>
-        <h2>Consolidate duplicate clients</h2>
-        <p className="page-sub" style={{marginBottom: 14}}>
-          Profiles that look like the same person (matched by phone, or by name when there's no phone). Choose which profile to keep — everything from the others (appointments, payments, charges, payment plans) moves onto it.
-        </p>
-
-        {msg && (/^Merged/.test(msg)
-          ? <div style={{background: "var(--ok-bg)", color: "var(--ok)", borderRadius: 8, padding: "8px 12px", marginBottom: 12, fontSize: 12}}>{msg}</div>
-          : <div role="alert" style={{background: "#FEF3CD", color: "#92400E", borderRadius: 8, padding: "8px 12px", marginBottom: 12, fontSize: 12}}>{msg}</div>)}
+      <div className="modal-box" onClick={e => e.stopPropagation()} style={{maxWidth: 640}}>
+        <h2>{queue && (total === 0 || idx >= total) ? "Duplicate check" : "Is this the same person?"}</h2>
 
         {loadErr && <LoadError message={loadErr} onRetry={load} />}
-        {!groups && !loadErr && <div className="loading">Looking for duplicates...</div>}
-        {groups && groups.length === 0 && (
-          <p style={{fontSize: 13, color: "var(--grey)"}}>No duplicate profiles found.</p>
+        {!queue && !loadErr && <div className="loading">Looking for people with two profiles...</div>}
+
+        {queue && total === 0 && (
+          <React.Fragment>
+            <p style={{fontSize: 14, margin: "8px 0 14px"}}>No one seems to have two profiles. Nothing to do.</p>
+            <button className="btn-secondary" onClick={onClose}>Done</button>
+          </React.Fragment>
         )}
 
-        {groups && groups.some(g => g.kind === "similar") && groups.some(g => g.kind === "sure") && (
-          <div style={{fontSize: 12, color: "var(--grey)", margin: "4px 0 8px"}}>Sure matches first (same phone or exact same name), then names that are only spelled differently.</div>
-        )}
-
-        {groups && groups.map(g => (
-          <div className="component-block" key={g.key} style={g.kind === "similar" ? {background: "#FFFBEB"} : undefined}>
-            <div className="component-label">
-              {g.clients[0].name} — {g.clients.length} profiles ({g.kind === "similar" ? (/^first name/.test(g.matchedOn) ? "same first name — check the dates below, nothing is pre-selected" : "spelled differently — check carefully, nothing is pre-selected") : "matched on " + g.matchedOn})
+        {queue && total > 0 && idx < total && !followUp && g && (
+          <React.Fragment>
+            <p className="page-sub" style={{margin: "0 0 4px"}}>
+              <strong>{idx + 1} of {total}.</strong> Just answer for each one. Nothing changes until you press “Same person”.
+            </p>
+            <div style={{height: 6, background: "var(--grey-light)", borderRadius: 4, margin: "6px 0 12px", overflow: "hidden"}}>
+              <div style={{height: "100%", width: Math.round((idx / total) * 100) + "%", background: "var(--magenta)"}} />
             </div>
-            {g.phonesDiffer && (
-              <div style={{background: "#FEF3CD", borderRadius: 8, padding: "6px 10px", margin: "4px 0 8px", fontSize: 12, color: "#92400E"}}>
-                <strong>These profiles have different phone numbers.</strong> Merge them only if you know it is the same person (a typo in one number, or someone who gave you two numbers).
-              </div>
-            )}
-            {g.sameDayBookings && g.sameDayBookings.length > 0 && (
-              <div style={{background: "#FDECEC", border: "1px solid #F5C2C2", borderRadius: 8, padding: "6px 10px", margin: "4px 0 8px", fontSize: 12, color: "#991B1B"}}>
-                <strong>Both profiles have a booking on {g.sameDayBookings.join(", ")}.</strong> If that was one visit, Reports count it twice. After merging, cancel the extra booking.
-              </div>
-            )}
-            {g.bothPaid && (
-              <div style={{background: "#FEF3CD", borderRadius: 8, padding: "6px 10px", margin: "4px 0 8px", fontSize: 12, color: "#92400E"}}>
-                <strong>Both profiles already have payments</strong> ({g.clients.map(c => c.name + " " + (c.paid || 0) + " TND").join(" · ")}). After merging, open the profile and remove a payment if the same visit was paid for only once.
-              </div>
-            )}
-            {g.evidence && g.evidence.length > 0 && (
-              <div style={{background: "#ECFDF3", border: "1px solid #BFE8CF", borderRadius: 8, padding: "6px 10px", margin: "4px 0 8px", fontSize: 12, color: "#166534"}}>
-                <strong>Same-day activity:</strong>
-                {g.evidence.map(ev => (
-                  <div key={ev.date}>
-                    {ev.date}: {g.clients.filter(c => ev.byClient[c.id]).map(c => c.name + " (" + ev.byClient[c.id].join(", ") + ")").join("  ·  ")}
-                  </div>
-                ))}
-              </div>
-            )}
-            {g.kind === "similar" && (!g.evidence || g.evidence.length === 0) && /^first name/.test(g.matchedOn) && (
-              <div style={{fontSize: 12, color: "#92400E", margin: "4px 0 8px"}}>No booking, fiche or payment falls on the same day, so only the first name connects them.</div>
-            )}
-            {g.clients.map(c => (
-              <div className="ledger-row" key={c.id} style={{alignItems: "center"}}>
-                <label style={{display: "flex", alignItems: "center", gap: 8, cursor: "pointer", flex: 1}}>
-                  <input
-                    type="radio"
-                    name={"primary-" + g.key}
-                    checked={primary[g.key] === c.id}
-                    onChange={() => setPrimary(prev => ({ ...prev, [g.key]: c.id }))}
-                  />
-                  <span>
-                    <span style={{fontWeight: primary[g.key] === c.id ? 600 : 400}}>{c.name}</span>
-                    <span style={{fontSize: 11, color: "var(--grey)", display: "block"}}>
-                      {c.packageId || "no package"}{c.phone ? " · " + c.phone : ""}
-                    </span>
-                    {c.paid > 0 && <span style={{fontSize: 11, color: "var(--grey)", display: "block"}}>paid {c.paid} TND</span>}
-                    {c.activity && c.activity.length > 0 && (
-                      <span style={{fontSize: 11, color: "var(--grey)", display: "block"}}>
-                        {c.activity.slice(0, 4).map(a => a.date + " " + a.kinds.join("/")).join(" · ")}
-                      </span>
-                    )}
-                  </span>
-                </label>
-                {primary[g.key] === c.id ? (
-                  <span style={{fontSize: 11, color: "var(--magenta-dark)"}}>keep this one</span>
-                ) : (
-                  <label style={{fontSize: 11, color: "var(--grey)", display: "flex", alignItems: "center", gap: 4, cursor: "pointer"}}>
-                    <input type="checkbox" checked={!!(picked[g.key] || {})[c.id]} onChange={() => toggle(g.key, c.id)} />
-                    merge in
-                  </label>
-                )}
-              </div>
-            ))}
-            <button className="btn-small" style={{marginTop: 8}} disabled={busy} onClick={() => mergeGroup(g)}>
-              {busy ? "Merging..." : "Merge into “" + (g.clients.find(c => c.id === primary[g.key]) || {}).name + "”"}
-            </button>
-          </div>
-        ))}
 
-        {warnings.sharedPhone.length > 0 && (
-          <div className="component-block" style={{background: "#FEF3CD"}}>
-            <div className="component-label">Same phone number, different names — probably NOT the same person</div>
-            <p style={{fontSize: 12, color: "#92400E", margin: "4px 0 8px"}}>
-              These are not offered for merging. If one number was typed wrongly, correct it in that profile and they will stop appearing here.
-            </p>
-            {warnings.sharedPhone.map(w => (
-              <div key={w.key} style={{fontSize: 13, padding: "4px 0"}}>{w.clients.map(c => c.name).join("  ·  ")}</div>
-            ))}
-          </div>
-        )}
-        {warnings.businessNumber.length > 0 && (
-          <div className="component-block" style={{background: "#FEF3CD"}}>
-            <div className="component-label">Profiles that have your business number instead of the client's</div>
-            <p style={{fontSize: 12, color: "#92400E", margin: "4px 0 8px"}}>
-              Your own number (the one printed on invoices) can't identify a client, so these are ignored when looking for duplicates. Open each profile and enter the client's own number.
-            </p>
-            {warnings.businessNumber.map(c => (
-              <div key={c.id} style={{fontSize: 13, padding: "4px 0"}}>{c.name}</div>
-            ))}
-          </div>
+            <div style={{background: "#F8F7F7", borderRadius: 8, padding: "8px 12px", fontSize: 13, marginBottom: 10}}>
+              {reasons(g).map((r, i) => <div key={i} style={{padding: "1px 0"}}>• {r}</div>)}
+            </div>
+
+            <div style={{display: "flex", gap: 10, flexWrap: "wrap"}}>{g.clients.map(card)}</div>
+
+            {(g.bothPaid || (g.sameDayBookings && g.sameDayBookings.length > 0)) && (
+              <div style={{background: "#FEF3CD", borderRadius: 8, padding: "8px 12px", fontSize: 12, color: "#92400E", marginTop: 10}}>
+                <strong>Heads-up for after you merge:</strong>
+                {g.bothPaid && <div>Both already have a payment ({g.clients.map(c => (c.paid || 0) + " TND").join(" and ")}). I'll show them so you can remove one if it was the same visit.</div>}
+                {g.sameDayBookings && g.sameDayBookings.length > 0 && <div>Both have a booking on {g.sameDayBookings.join(", ")}. If that was one visit, Reports count it twice, so cancel one of those bookings afterwards.</div>}
+              </div>
+            )}
+
+            {msg && <div role="alert" style={{background: "#FEF3CD", color: "#92400E", borderRadius: 8, padding: "8px 12px", marginTop: 10, fontSize: 13}}>{msg}</div>}
+
+            <div style={{display: "flex", flexDirection: "column", gap: 8, marginTop: 14}}>
+              <button className="btn-confirm" disabled={busy} onClick={merge}>{busy ? "Working..." : "Yes, same person — merge into “" + keptName + "”"}</button>
+              <button className="btn-secondary" disabled={busy} onClick={different}>No, different people</button>
+              <button className="btn-small" disabled={busy} style={{alignSelf: "center", background: "transparent", color: "var(--grey)", textDecoration: "underline"}} onClick={skip}>Not sure — skip for now</button>
+            </div>
+            <p style={{fontSize: 11, color: "var(--grey)", margin: "10px 0 0"}}>Merging moves all appointments, payments and notes onto the profile you keep and removes the other. It can't be undone.</p>
+          </React.Fragment>
         )}
 
-        <p style={{fontSize: 11, color: "var(--grey)", marginTop: 10}}>
-          Merging can't be undone. The kept profile gains all the history; the others are removed. Any different packages they had are noted on the kept profile.
-        </p>
-        <button className="btn-secondary" style={{marginTop: 10}} onClick={onClose}>Done</button>
+        {followUp && (
+          <React.Fragment>
+            <div role="status" style={{background: "var(--ok-bg)", color: "var(--ok)", borderRadius: 8, padding: "8px 12px", margin: "8px 0", fontSize: 13}}>Merged into {followUp.name}.</div>
+            <div style={{background: "#FEF3CD", borderRadius: 8, padding: "10px 12px", fontSize: 13, color: "#92400E"}}>
+              <strong>One quick check.</strong>
+              {followUp.days.length > 0 && <div style={{margin: "4px 0"}}>This person has two bookings on {followUp.days.join(", ")}. If it was one visit, cancel the extra booking in the Calendar so Reports don't count it twice.</div>}
+              {followUp.payments.length > 0 && (
+                <div style={{margin: "6px 0"}}>
+                  Payments on the merged profile{followUp.price ? " (the package costs " + followUp.price + " TND)" : ""} — remove any that were entered twice for the same visit:
+                  {followUp.payments.map(p => (
+                    <div key={p.id} style={{display: "flex", justifyContent: "space-between", alignItems: "center", padding: "4px 0", borderTop: "1px solid #F6E3A1"}}>
+                      <span>{p.date} · {p.amount} TND{p.method ? " · " + p.method : ""}</span>
+                      <span style={{textDecoration: "underline", cursor: "pointer"}} onClick={() => removePayment(p.id)}>remove</span>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+            {msg && <div role="alert" style={{fontSize: 12, color: "var(--magenta-dark)", marginTop: 6}}>{msg}</div>}
+            <button className="btn-confirm" style={{marginTop: 12}} onClick={goNext}>{idx + 1 < total ? "Done — next person" : "Done"}</button>
+          </React.Fragment>
+        )}
+
+        {queue && total > 0 && idx >= total && !followUp && (
+          <React.Fragment>
+            <div style={{background: "var(--ok-bg)", color: "var(--ok)", borderRadius: 8, padding: "10px 14px", margin: "8px 0", fontSize: 14}}>
+              <strong>All done.</strong> Merged: {stats.merged} · Kept separate: {stats.separate} · Skipped: {stats.skipped}
+            </div>
+            {stats.skipped > 0 && <p style={{fontSize: 13, color: "var(--grey)"}}>The ones you skipped will be here next time you open this.</p>}
+            <button className="btn-secondary" onClick={onClose}>Close</button>
+          </React.Fragment>
+        )}
+
+        {queue && (warnings.sharedPhone.length > 0 || warnings.businessNumber.length > 0) && (
+          <details style={{marginTop: 16}}>
+            <summary style={{fontSize: 12, color: "var(--grey)", cursor: "pointer"}}>Other things I noticed</summary>
+            {warnings.sharedPhone.length > 0 && (
+              <div style={{background: "#FEF3CD", borderRadius: 8, padding: "8px 12px", marginTop: 8, fontSize: 12, color: "#92400E"}}>
+                <strong>Same phone number, clearly different names</strong> (probably not the same person; not offered for merging). If a number was typed wrongly, fix it in that profile.
+                {warnings.sharedPhone.map(w => <div key={w.key} style={{padding: "2px 0"}}>{w.clients.map(c => c.name).join("  ·  ")}</div>)}
+              </div>
+            )}
+            {warnings.businessNumber.length > 0 && (
+              <div style={{background: "#FEF3CD", borderRadius: 8, padding: "8px 12px", marginTop: 8, fontSize: 12, color: "#92400E"}}>
+                <strong>Profiles holding your business number</strong> instead of the client's. Open each and enter the client's own number.
+                {warnings.businessNumber.map(c => <div key={c.id} style={{padding: "2px 0"}}>{c.name}</div>)}
+              </div>
+            )}
+          </details>
+        )}
+
+        {queue && total > 0 && idx < total && !followUp && <button className="btn-secondary" style={{marginTop: 14}} onClick={onClose}>Stop for now</button>}
       </div>
     </div>
   );
