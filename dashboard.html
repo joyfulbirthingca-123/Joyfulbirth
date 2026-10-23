@@ -4018,6 +4018,113 @@ function CreateProfileFromBooking({ appt, packages, currentStaff, pin, onCreated
   );
 }
 
+// Owner screen: close days or hours on the public booking page.
+function DaysOffView({ pin }) {
+  const todayStr = new Date().toISOString().split("T")[0];
+  const [data, setData] = useState(null);
+  const [err, setErr] = useState("");
+  const [from, setFrom] = useState(todayStr);
+  const [to, setTo] = useState("");
+  const [hours, setHours] = useState(false);
+  const [ft, setFt] = useState("");
+  const [tt, setTt] = useState("");
+  const [reason, setReason] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [msg, setMsg] = useState("");
+  const [booked, setBooked] = useState([]);
+
+  const load = () => {
+    setErr("");
+    apiCall({ action: "getDaysOff", pin }).then(res => {
+      if (res.success) setData(res); else setErr(res.error || "Couldn't load days off.");
+    }).catch(() => setErr("Couldn't reach the server. Please try again."));
+  };
+  useEffect(() => { load(); }, []);
+
+  const save = () => {
+    setBusy(true); setMsg(""); setBooked([]);
+    apiCall({ action: "addDayOff", pin, fromDate: from, toDate: to || from, fromTime: hours ? ft : "", toTime: hours ? tt : "", reason }).then(res => {
+      setBusy(false);
+      if (res.success) {
+        setMsg("Saved. The booking page now offers nothing " + (hours ? "in those hours." : "on those days."));
+        setBooked(res.alreadyBooked || []);
+        setReason(""); setTo(""); setFt(""); setTt("");
+        load();
+      } else setMsg(res.error || "Could not save.");
+    }).catch(() => { setBusy(false); setMsg("Couldn't reach the server. Check the list before pressing again."); });
+  };
+  const remove = (id) => {
+    if (!window.confirm("Open these days for booking again?")) return;
+    apiCall({ action: "deleteDayOff", pin, blockId: id }).then(res => { if (res.success) { setMsg("Removed."); setBooked([]); load(); } else setMsg(res.error || "Could not remove."); }).catch(() => setMsg("Couldn't reach the server."));
+  };
+  const range = (a, b) => a === b ? a : a + " → " + b;
+
+  return (
+    <div>
+      <h2 className="hub-view-title">Days off</h2>
+      <p className="page-sub">Close days or hours on the public booking page. Nobody can book them, even with the page already open.</p>
+      {err && <LoadError message={err} onRetry={load} />}
+      {!data && !err && <div className="loading">Loading...</div>}
+      {msg && <div role="status" style={{background: "var(--ok-bg)", color: "var(--ok)", borderRadius: 8, padding: "8px 12px", marginBottom: 12, fontSize: 13}}>{msg}</div>}
+      {booked.length > 0 && (
+        <div role="alert" style={{background: "#FFFBEB", border: "1px solid #F6E3A1", borderRadius: 8, padding: "10px 14px", marginBottom: 12, fontSize: 13, color: "#92400E"}}>
+          <strong>{booked.length} client{booked.length !== 1 ? "s are" : " is"} already booked in this period</strong> — they are not removed, so please contact {booked.length !== 1 ? "them" : "them"}:
+          {booked.map((b, i) => <div key={i}>{b.date} {b.time} · {b.name}{b.phone ? " · " + b.phone : ""}{b.service ? " · " + b.service : ""}</div>)}
+        </div>
+      )}
+
+      <div className="card">
+        <div className="component-label">Close days or hours</div>
+        <div className="payment-form-row">
+          <input className="form-input" type="date" min={todayStr} value={from} onChange={e => setFrom(e.target.value)} />
+          <input className="form-input" type="date" min={from || todayStr} value={to} onChange={e => setTo(e.target.value)} placeholder="Last day (optional)" />
+        </div>
+        <p style={{fontSize: 11, color: "var(--grey)", margin: "4px 0"}}>Leave “last day” empty for a single day.</p>
+        <label style={{display: "flex", alignItems: "center", gap: 6, fontSize: 13, margin: "6px 0", cursor: "pointer"}}>
+          <input type="checkbox" checked={hours} onChange={e => setHours(e.target.checked)} /> Only some hours of the day
+        </label>
+        {hours && (
+          <div className="payment-form-row">
+            <input className="form-input" type="time" value={ft} onChange={e => setFt(e.target.value)} />
+            <input className="form-input" type="time" value={tt} onChange={e => setTt(e.target.value)} />
+          </div>
+        )}
+        <input className="form-input" style={{marginTop: 6, width: "100%"}} placeholder="Reason (only you see this)" value={reason} onChange={e => setReason(e.target.value)} />
+        <button className="btn-confirm" style={{marginTop: 10}} disabled={busy || !from || (hours && !ft && !tt)} onClick={save}>{busy ? "Saving..." : "Close " + (hours ? "these hours" : (to && to !== from ? "these days" : "this day"))}</button>
+      </div>
+
+      {data && (
+        <div className="card">
+          <div className="component-label">Closed here</div>
+          {data.blocks.length === 0 && <p style={{fontSize: 13, color: "var(--grey)"}}>Nothing closed yet.</p>}
+          {data.blocks.map(b => (
+            <div key={b.id} style={{display: "flex", justifyContent: "space-between", gap: 10, padding: "8px 0", borderTop: "1px solid var(--grey-light)"}}>
+              <div>
+                <div style={{fontSize: 13, fontWeight: 600}}>{range(b.from, b.to)}{b.fromTime || b.toTime ? " · " + (b.fromTime || "00:00") + "–" + (b.toTime || "24:00") : " · whole day"}</div>
+                {b.reason && <div style={{fontSize: 12, color: "var(--grey)"}}>{b.reason}</div>}
+              </div>
+              <span style={{fontSize: 12, color: "var(--grey)", textDecoration: "underline", cursor: "pointer", whiteSpace: "nowrap"}} onClick={() => remove(b.id)}>reopen</span>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {data && (
+        <div className="card">
+          <div className="component-label">Closed by your Google Calendar</div>
+          <p style={{fontSize: 12, color: "var(--grey)", margin: "2px 0 6px"}}>An <strong>all-day</strong> calendar entry closes that day when its title contains a word like <em>off, closed, holiday, vacation, away, Tunis, congé, fermé</em>. Other all-day entries (reminders) don't close anything. To reopen a day, change or delete the calendar entry.</p>
+          {data.fromCalendar.length === 0 && <p style={{fontSize: 13, color: "var(--grey)"}}>No all-day entries are closing days right now.</p>}
+          {data.fromCalendar.map((c, i) => (
+            <div key={i} style={{padding: "6px 0", borderTop: "1px solid var(--grey-light)", fontSize: 13}}>
+              <strong>{range(c.from, c.to)}</strong> · “{c.title}”
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
 function CalendarView({ pin, currentStaff }) {
   const now = new Date();
   const [month, setMonth] = useState(now.getMonth() + 1); // 1-12
@@ -4880,6 +4987,11 @@ function Dashboard({ staff, pin, onLogout }) {
         <div className={"nav-item" + (view === "messages" ? " active" : "")} onClick={() => setView("messages")}>
           Messages
         </div>
+        {staff.role === "owner" && (
+          <div className={"nav-item" + (view === "daysoff" ? " active" : "")} onClick={() => setView("daysoff")}>
+            Days off
+          </div>
+        )}
 
         <div className="nav-section">Clients</div>
         <div className={"nav-item" + (view === "clients" ? " active" : "")} onClick={() => setView("clients")}>
@@ -4911,6 +5023,7 @@ function Dashboard({ staff, pin, onLogout }) {
         {data && view === "today" && <TodayView pin={pin} data={data} onRefresh={loadData} onReview={() => { setClientsOpen(staff.role === "owner" ? "link" : "import"); setView("clients"); }} refreshKey={ficheTick} />}
         {data && view === "calendar" && <CalendarView pin={pin} currentStaff={staff} />}
         {data && view === "groups" && <GroupClassesView pin={pin} currentStaff={staff} />}
+        {data && view === "daysoff" && staff.role === "owner" && <DaysOffView pin={pin} />}
         {data && view === "messages" && <MessagesView pin={pin} />}
         {data && view === "clients" && <ClientsView pin={pin} currentStaff={staff} autoOpen={clientsOpen} onAutoOpened={() => setClientsOpen(null)} />}
         {data && view === "invoice" && <InvoicesHub pin={pin} />}
