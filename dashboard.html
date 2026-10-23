@@ -1687,6 +1687,11 @@ function MergeClientsModal({ pin, onClose, onMerged }) {
                 <strong>These profiles have different phone numbers.</strong> Merge them only if you know it is the same person (a typo in one number, or someone who gave you two numbers).
               </div>
             )}
+            {g.sameDayBookings && g.sameDayBookings.length > 0 && (
+              <div style={{background: "#FDECEC", border: "1px solid #F5C2C2", borderRadius: 8, padding: "6px 10px", margin: "4px 0 8px", fontSize: 12, color: "#991B1B"}}>
+                <strong>Both profiles have a booking on {g.sameDayBookings.join(", ")}.</strong> If that was one visit, Reports count it twice. After merging, cancel the extra booking.
+              </div>
+            )}
             {g.bothPaid && (
               <div style={{background: "#FEF3CD", borderRadius: 8, padding: "6px 10px", margin: "4px 0 8px", fontSize: 12, color: "#92400E"}}>
                 <strong>Both profiles already have payments</strong> ({g.clients.map(c => c.name + " " + (c.paid || 0) + " TND").join(" · ")}). After merging, open the profile and remove a payment if the same visit was paid for only once.
