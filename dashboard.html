@@ -1160,7 +1160,8 @@ function AddOnNote({ addOns }) {
   const ex = addOns.excluded || [];
   const tu = addOns.topUps || { count: 0, total: 0 };
   const un = addOns.uncovered || { clients: 0, total: 0 };
-  if (addOns.count === 0 && ex.length === 0 && tu.count === 0 && un.clients === 0) return null;
+  const uc = addOns.uncertain || { count: 0, total: 0, items: [] };
+  if (addOns.count === 0 && ex.length === 0 && tu.count === 0 && un.clients === 0 && uc.count === 0) return null;
   return (
     <div style={{margin: "0 0 14px"}}>
       {addOns.count > 0 && (
@@ -1176,6 +1177,12 @@ function AddOnNote({ addOns }) {
       {ex.length > 0 && (
         <div style={{background: "#FFFBEB", border: "1px solid #F6E3A1", borderRadius: 8, padding: "8px 12px", fontSize: 12, color: "#92400E", marginBottom: 6}}>
           Not counted twice: {ex.length} add-on{ex.length !== 1 ? "s" : ""} match a booking for the same person, day and amount ({ex.map(e => e.clientName + " " + e.amount + " TND, " + e.date).join("; ")}). If one of these is a genuinely separate service, change its amount or date.
+        </div>
+      )}
+      {uc.count > 0 && (
+        <div style={{background: "#FFFBEB", border: "1px solid #F6E3A1", borderRadius: 8, padding: "8px 12px", fontSize: 12, color: "#92400E", marginBottom: 6}}>
+          <strong>Left out until you check ({uc.total} TND):</strong> {uc.count} payment{uc.count !== 1 ? "s look" : " looks"} like money already counted through a booking made under a slightly different name. Connect them with Clients → Link bookings to clients and they are sorted out for good.
+          {uc.items.map((x, i) => <div key={i}>{x.clientName}: {x.amount} TND on {x.date} · booking {x.bookingNote}</div>)}
         </div>
       )}
       {un.clients > 0 && (
@@ -1675,6 +1682,16 @@ function MergeClientsModal({ pin, onClose, onMerged }) {
             <div className="component-label">
               {g.clients[0].name} — {g.clients.length} profiles ({g.kind === "similar" ? (/^first name/.test(g.matchedOn) ? "same first name — check the dates below, nothing is pre-selected" : "spelled differently — check carefully, nothing is pre-selected") : "matched on " + g.matchedOn})
             </div>
+            {g.phonesDiffer && (
+              <div style={{background: "#FEF3CD", borderRadius: 8, padding: "6px 10px", margin: "4px 0 8px", fontSize: 12, color: "#92400E"}}>
+                <strong>These profiles have different phone numbers.</strong> Merge them only if you know it is the same person (a typo in one number, or someone who gave you two numbers).
+              </div>
+            )}
+            {g.bothPaid && (
+              <div style={{background: "#FEF3CD", borderRadius: 8, padding: "6px 10px", margin: "4px 0 8px", fontSize: 12, color: "#92400E"}}>
+                <strong>Both profiles already have payments</strong> ({g.clients.map(c => c.name + " " + (c.paid || 0) + " TND").join(" · ")}). After merging, open the profile and remove a payment if the same visit was paid for only once.
+              </div>
+            )}
             {g.evidence && g.evidence.length > 0 && (
               <div style={{background: "#ECFDF3", border: "1px solid #BFE8CF", borderRadius: 8, padding: "6px 10px", margin: "4px 0 8px", fontSize: 12, color: "#166534"}}>
                 <strong>Same-day activity:</strong>
@@ -1702,6 +1719,7 @@ function MergeClientsModal({ pin, onClose, onMerged }) {
                     <span style={{fontSize: 11, color: "var(--grey)", display: "block"}}>
                       {c.packageId || "no package"}{c.phone ? " · " + c.phone : ""}
                     </span>
+                    {c.paid > 0 && <span style={{fontSize: 11, color: "var(--grey)", display: "block"}}>paid {c.paid} TND</span>}
                     {c.activity && c.activity.length > 0 && (
                       <span style={{fontSize: 11, color: "var(--grey)", display: "block"}}>
                         {c.activity.slice(0, 4).map(a => a.date + " " + a.kinds.join("/")).join(" · ")}
