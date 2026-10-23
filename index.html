@@ -63,7 +63,8 @@ const normDate=s=>{if(!s)return "";if(typeof s==="string"&&s.match(/^\d{4}-\d{2}
 const fmtT=t=>{if(!t)return"";const[h,mn]=t.split(":").map(Number);return(h%12||12)+":"+(mn<10?"0":"")+mn+" "+(h>=12?"PM":"AM");};
 const todayStr=()=>{const d=new Date();return d.getFullYear()+"-"+(d.getMonth()<9?"0":"")+(d.getMonth()+1)+"-"+(d.getDate()<10?"0":"")+d.getDate();};
 const toMin=t=>{const[h,m]=t.split(":").map(Number);return h*60+m;};
-const fromMin=m=>(m/60|0<10?"0":"")+(m/60|0)+":"+(m%60<10?"0":"")+m%60;
+const fromMin=m=>{const h=Math.floor(m/60),mi=m%60;return(h<10?"0":"")+h+":"+(mi<10?"0":"")+mi;};
+var slotsReqId=0;   // numbers each availability request so a slow, older answer can never overwrite a newer one
 
 // -- TRANSLATIONS --------------------------------------------------
 const TR={
@@ -73,7 +74,7 @@ const TR={
     fmtDate:fmtEN,fmtTime:fmtT,
     loading:"Loading...",bookTitle:"Book an appointment",bookSub:"Choose the service you'd like to book:",
     book:"Book",chooseOpt:"Choose an option",chooseDate:"Choose a date & time",
-    noSlots:"No available slots for this day.",cont:"Continue",yourDetails:"Your details",
+    noSlots:"No available slots for this day.",slotsErr:"We couldn't check which times are free right now.",retry:"Try again",closedDay:"Joy isn't available on this day. Please choose another date.",slotTaken:"Sorry, that time was just taken. Please choose another time.",busyTry:"The booking system is busy for a moment. Please press Confirm again.",cont:"Continue",yourDetails:"Your details",
     whereAppt:"Where would you like your appointment? *",
     locOffice:"Your office",locOfficeSub:"I'll come to you",
     locHome:"My home",locHomeSub:"Home visit",
@@ -129,7 +130,7 @@ const TR={
     fmtDate:fmtFR,fmtTime:function(t){return t||"";},
     loading:"Chargement...",bookTitle:"Prendre un rendez-vous",bookSub:"Choisissez le service que vous souhaitez r\xe9server :",
     book:"R\xe9server",chooseOpt:"Choisissez une option",chooseDate:"Choisissez une date et une heure",
-    noSlots:"Aucun cr\xe9neau disponible ce jour.",cont:"Continuer",yourDetails:"Vos coordonn\xe9es",
+    noSlots:"Aucun cr\xe9neau disponible ce jour.",slotsErr:"Impossible de v\xe9rifier les horaires disponibles pour le moment.",retry:"R\xe9essayer",closedDay:"Joy n\u2019est pas disponible ce jour-l\xe0. Veuillez choisir une autre date.",slotTaken:"D\xe9sol\xe9, cet horaire vient d\u2019\xeatre pris. Veuillez en choisir un autre.",busyTry:"Le syst\xe8me est occup\xe9 un instant. Veuillez appuyer \xe0 nouveau sur Confirmer.",cont:"Continuer",yourDetails:"Vos coordonn\xe9es",
     whereAppt:"O\xf9 souhaitez-vous le rendez-vous ? *",
     locOffice:"Cabinet",locOfficeSub:"Je me d\xe9place chez vous",
     locHome:"Domicile",locHomeSub:"Visite \xe0 domicile",
@@ -364,7 +365,10 @@ function syncToBackend(booking,scriptUrl){
       })
       .then(function(result){
         if(!result||result.success!==true){
-          throw new Error((result&&result.error)||"The booking could not be saved.");
+          var failure=new Error((result&&result.error)||"The booking could not be saved.");
+          if(result&&result.conflict)failure.conflict=result.conflict;      // "taken" or "closed": the slot is not available any more
+          if(result&&result.busyTryAgain)failure.busy=true;                  // the server was busy with another booking: nothing was saved
+          throw failure;
         }
         return result;
       })
@@ -405,6 +409,11 @@ function App(){
   const[rcMap,   setRcMap]  =useState({});
   const[serverBooked,setServerBooked]=useState([]);// booked times fetched from server
   const[slotsLoading,setSlotsLoading]=useState(false);// tracks which returningClient services have toggle on
+  const[serverBusy,setServerBusy]=useState([]);      // busy time ranges {start,end} (minutes) for the chosen date
+  const[dayClosed,setDayClosed]=useState(false);     // the chosen date is closed (a day off)
+  const[slotsError,setSlotsError]=useState(false);   // the availability check failed: ask to retry instead of guessing
+  const[closedDays,setClosedDays]=useState({});      // dates closed in the month on screen
+  const[slotNotice,setSlotNotice]=useState("");      // e.g. "that time was just taken"
   // Admin key: protects the full booking list. Kept only for this browser tab (sessionStorage),
   // never in the page's code. The public pages never send it.
   const[adminKey,setAdminKey]=useState(function(){try{return sessionStorage.getItem("jbs_ak")||"";}catch(e){return "";}});
@@ -456,6 +465,29 @@ function App(){
     setStoOk(sto.set("jbs_test","1"));
     setReady(true);
   },[]);
+
+  // While the date picker is open, ask which days of the month are closed (days off) and grey them out.
+  // If this fails nothing is greyed out, but the server still refuses a booking on a closed day.
+  useEffect(()=>{
+    if(view!=="dt"||!HARDCODED_SCRIPT_URL)return;
+    var y=calMo.getFullYear(),m=calMo.getMonth();
+    var p2=function(n){return(n<10?"0":"")+n;};
+    var from=y+"-"+p2(m+1)+"-01",to=y+"-"+p2(m+1)+"-"+p2(new Date(y,m+1,0).getDate());
+    var stale=false;
+    fetch(HARDCODED_SCRIPT_URL+"?action=closed&from="+from+"&to="+to,{method:"GET",cache:"no-cache"})
+      .then(function(r){return r.json();})
+      .then(function(d){
+        if(stale||!d||!d.closed)return;
+        setClosedDays(function(prev){
+          var next={};
+          Object.keys(prev).forEach(function(k){if(k.slice(0,7)!==from.slice(0,7))next[k]=true;});
+          d.closed.forEach(function(k){next[k]=true;});
+          return next;
+        });
+      })
+      .catch(function(){});
+    return function(){stale=true;};
+  },[view,calMo]);
 
   const showToast=msg=>{setToast(msg);setTimeout(()=>setToast(""),2500);};
   const saveSvcs =v=>{setSvcs(v); sto.set("jbs_sv",v);};
@@ -531,22 +563,29 @@ function App(){
   // Fetch booked times for a date from the server (Google Sheet + Calendar)
   var fetchServerBooked=function(ds){
     var url=HARDCODED_SCRIPT_URL;
-    if(!url)return;
-    setSlotsLoading(true);
-    fetch(url+"?action=slots&date="+ds,{method:"GET",cache:"no-cache"})
-      .then(function(r){return r.json();})
+    if(!url){setSlotsError(true);return;}
+    var myReq=++slotsReqId;
+    setSlotsLoading(true);setSlotsError(false);
+    var controller=new AbortController();
+    var timer=setTimeout(function(){controller.abort();},30000);
+    fetch(url+"?action=slots&date="+ds,{method:"GET",cache:"no-cache",signal:controller.signal})
+      .then(function(r){if(!r.ok)throw new Error("HTTP "+r.status);return r.json();})
       .then(function(d){
-        if(d.booked)setServerBooked(d.booked);
+        if(myReq!==slotsReqId)return;   // an older answer for a date the visitor has already left
+        if(!d||d.error||!(d.busy||d.booked))throw new Error((d&&d.error)||"unreadable answer");
+        setServerBooked(d.booked||[]);setServerBusy(d.busy||[]);setDayClosed(!!d.closed);
         setSlotsLoading(false);
       })
       .catch(function(){
-        // If server fetch fails, fall back to local only
-        setSlotsLoading(false);
-      });
+        if(myReq!==slotsReqId)return;
+        // Never fall back to showing every time as free: say we could not check, and let the visitor retry.
+        setSlotsError(true);setSlotsLoading(false);
+      })
+      .finally(function(){clearTimeout(timer);});
   };
 
   var getSlots=ds=>{
-    if(!ds||!selSvc)return[];
+    if(!ds||!selSvc||dayClosed||slotsError)return[];
     var parts=ds.split("-").map(Number);
     var da=effAvl(selSvc)[new Date(parts[0],parts[1]-1,parts[2]).getDay()];
     if(!da||!da.enabled)return[];
@@ -554,7 +593,13 @@ function App(){
     var allBooked=serverBooked;
     var dur=selPkg?selPkg.dur:selSvc.dur;
     var sl=[];
-    da.times.forEach(function(t){var c=toMin(t.start);while(c+dur<=toMin(t.end)){var ts=fromMin(c);if(allBooked.indexOf(ts)<0)sl.push(ts);c+=30;}});
+    var nowD=new Date(),nowMin=ds===TDY?nowD.getHours()*60+nowD.getMinutes():-1;
+    da.times.forEach(function(t){var c=toMin(t.start);while(c+dur<=toMin(t.end)){
+      var ts=fromMin(c);
+      // free only if the WHOLE appointment (start to start+duration) clears everything already busy
+      var clash=allBooked.indexOf(ts)>=0||serverBusy.some(function(b){return c<b.end&&b.start<c+dur;});
+      if(!clash&&c>nowMin)sl.push(ts);
+      c+=30;}});
     return sl;
   };
 
@@ -605,6 +650,15 @@ function App(){
       setView("done");
     }catch(error){
       console.error("Booking confirmation failed:",error);
+      if(error&&error.conflict){
+        // Someone else took the slot (or the day closed) while this visitor was filling in the form.
+        setSelTime(null);setServerBusy([]);setServerBooked([]);setDayClosed(false);setSlotsError(false);
+        setSlotNotice(error.conflict==="closed"?tr.closedDay:tr.slotTaken);
+        fetchServerBooked(selDate);
+        setView("dt");
+        return;
+      }
+      if(error&&error.busy){setBookingError(tr.busyTry);return;}
       setBookingError(lang==="fr"
         ?"Nous ne pouvons pas confirmer l’enregistrement de votre réservation. Veuillez contacter Joy avant de réessayer afin d’éviter un doublon."
         :"We could not confirm that your booking was saved. Please contact Joy before trying again to avoid a duplicate booking.");
@@ -815,18 +869,23 @@ function App(){
           {cells.map((day,i)=>{
             if(!day)return<div key={"e"+i}/>;
             var ds=yr+"-"+(mo+1<10?"0":"")+(mo+1)+"-"+(day<10?"0":"")+day;
-            var past=ds<TDY,av=!past&&dayOk(ds,selSvc),sel=ds===selDate;
-            return<div key={ds} onClick={()=>av&&(setSelDate(ds),setSelTime(null),setServerBooked([]),fetchServerBooked(ds))} style={{aspectRatio:"1",display:"flex",alignItems:"center",justifyContent:"center",borderRadius:8,fontSize:13,cursor:av?"pointer":"default",userSelect:"none",background:sel?C.accent:"transparent",color:sel?"#fff":av?C.txt:C.t3,border:av&&!sel?"0.5px solid "+C.bdr:"none",fontWeight:sel?500:400}}>{day}</div>;
+            var past=ds<TDY,shut=!!closedDays[ds],av=!past&&!shut&&dayOk(ds,selSvc),sel=ds===selDate;
+            return<div key={ds} title={shut?tr.closedDay:undefined} onClick={()=>av&&(setSelDate(ds),setSelTime(null),setServerBooked([]),setServerBusy([]),setDayClosed(false),setSlotsError(false),setSlotNotice(""),fetchServerBooked(ds))} style={{aspectRatio:"1",display:"flex",alignItems:"center",justifyContent:"center",borderRadius:8,fontSize:13,cursor:av?"pointer":"default",userSelect:"none",background:sel?C.accent:"transparent",color:sel?"#fff":av?C.txt:C.t3,border:av&&!sel?"0.5px solid "+C.bdr:"none",fontWeight:sel?500:400,textDecoration:shut&&!past?"line-through":"none"}}>{day}</div>;
           })}
         </div>
       </div>
       {selDate&&<div style={S.cd}>
         <p style={Object.assign({},S.h3,{marginBottom:"0.75rem"})}><IcoCal size={13} style={{marginRight:6,color:C.accent}}/>{tr.fmtDate(selDate)}</p>
+        {slotNotice&&<p role="alert" style={{background:C.warnBg,border:"0.5px solid "+C.warn,borderRadius:8,padding:"0.6rem 0.8rem",fontSize:13,color:C.warn,margin:"0 0 0.75rem",lineHeight:1.5}}>{slotNotice}</p>}
         {slotsLoading
           ?<div style={{display:"flex",alignItems:"center",gap:8,padding:"0.5rem 0",color:C.t2,fontSize:13}}>
               <div style={{width:16,height:16,border:"2px solid "+C.accent,borderTopColor:"transparent",borderRadius:"50%",animation:"spin 0.8s linear infinite"}}/>
               Checking availability...
             </div>
+          :slotsError
+            ?<div><p role="alert" style={Object.assign({},S.sb,{color:C.err})}>{tr.slotsErr}</p><button style={S.bt} onClick={()=>fetchServerBooked(selDate)}>{tr.retry}</button></div>
+          :dayClosed
+            ?<p style={S.sb}>{tr.closedDay}</p>
           :slots.length===0
             ?<p style={S.sb}>{tr.noSlots}</p>
             :<div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(100px,1fr))",gap:8}}>
