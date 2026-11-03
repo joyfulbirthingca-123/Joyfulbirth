@@ -1308,6 +1308,235 @@ function FichePanel({ client, pin }) {
   );
 }
 
+// ---- pregnancy weeks (same arithmetic as the server: 280 days from the first day, the due date is 40w0d) ----
+function localDayStr() { const d = new Date(); return d.getFullYear() + "-" + String(d.getMonth() + 1).padStart(2, "0") + "-" + String(d.getDate()).padStart(2, "0"); }
+function gestationText(dueStr) {
+  if (!dueStr) return "";
+  const a = dueStr.split("-").map(Number), b = localDayStr().split("-").map(Number);
+  const toDue = Math.round((Date.UTC(a[0], a[1] - 1, a[2]) - Date.UTC(b[0], b[1] - 1, b[2])) / 86400000);
+  const ga = 280 - toDue;
+  return ga < 0 ? "" : Math.floor(ga / 7) + "w" + (ga % 7) + "d";
+}
+function prettyDay(str) {
+  if (!str) return "";
+  const d = new Date(str + "T12:00:00");
+  return isNaN(d.getTime()) ? str : d.toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric" });
+}
+function dueIn(daysToDue) { return daysToDue > 1 ? "in " + daysToDue + " days" : daysToDue === 1 ? "tomorrow" : daysToDue === 0 ? "today" : Math.abs(daysToDue) + " day" + (Math.abs(daysToDue) !== 1 ? "s" : "") + " past due"; }
+
+// Everyone in their due window, with what you need in the middle of the night.
+function OnCallView({ pin }) {
+  const [data, setData] = useState(null);
+  const [err, setErr] = useState("");
+  const [city, setCity] = useState("all");
+  const [open, setOpen] = useState({});
+  const [msg, setMsg] = useState("");
+  const [busy, setBusy] = useState(false);
+
+  const load = () => {
+    setErr("");
+    apiCall({ action: "getOnCall", pin }).then(res => {
+      if (res.success) setData(res); else setErr(res.error || "Couldn't load the on-call list.");
+    }).catch(() => setErr("Couldn't reach the server. Please try again."));
+  };
+  useEffect(() => { load(); }, []);
+
+  const fillAll = () => {
+    setBusy(true); setMsg("");
+    apiCall({ action: "applyFicheDueDates", pin }).then(res => {
+      setBusy(false);
+      setMsg(res.success ? "Filled in " + res.filled + " due date" + (res.filled !== 1 ? "s" : "") + " from the fiches." + (res.skippedApprox ? " " + res.skippedApprox + " only gave a month, so check those by hand." : "") : (res.error || "Could not fill them in."));
+      load();
+    }).catch(() => { setBusy(false); setMsg("Couldn't reach the server."); });
+  };
+  const useDate = (n) => {
+    setBusy(true); setMsg("");
+    apiCall({ action: "updateClient", pin, clientId: n.id, dueDate: n.suggestion.date }).then(res => { setBusy(false); setMsg(res.success ? n.name + ": due date set to " + prettyDay(n.suggestion.date) + "." : (res.error || "Could not save.")); load(); }).catch(() => { setBusy(false); setMsg("Couldn't reach the server."); });
+  };
+  const born = (c) => {
+    if (!window.confirm("Mark " + c.name + "'s baby as born today? She will leave the on-call list.")) return;
+    apiCall({ action: "updateClient", pin, clientId: c.id, babyBirthDate: localDayStr() }).then(res => { setMsg(res.success ? "Congratulations! " + c.name + " is off the on-call list." : (res.error || "Could not save.")); load(); }).catch(() => setMsg("Couldn't reach the server."));
+  };
+
+  const inCity = (c) => city === "all" || c.city === city;
+  const list = data ? data.onCall.filter(inCity) : [];
+  const soon = data ? data.coming.filter(inCity) : [];
+  const exactFillable = data ? data.needsDate.filter(n => n.suggestion && !n.suggestion.approx).length : 0;
+  const chip = (v, label) => (
+    <button key={v} onClick={() => setCity(v)} style={{padding: "6px 14px", border: "none", cursor: "pointer", fontSize: 13, fontFamily: "inherit", background: city === v ? "var(--magenta)" : "transparent", color: city === v ? "#fff" : "var(--grey)"}}>{label}</button>
+  );
+  const detail = (label, value, warn) => value ? (
+    <div style={{display: "flex", gap: 8, fontSize: 13, padding: "3px 0", borderTop: "1px solid var(--grey-light)", color: warn ? "#92400E" : "inherit"}}>
+      <span style={{flex: "0 0 34%", color: warn ? "#92400E" : "var(--grey)"}}>{label}</span><span style={{flex: 1}}>{value}</span>
+    </div>
+  ) : null;
+
+  return (
+    <div>
+      <h1 className="page-title">On call</h1>
+      <p className="page-sub">Clients between {data ? data.window.from : 37} and {data ? data.window.to : 42} weeks of pregnancy, counted from the due date on their profile. Doula (Joyful Birth Method) clients are included automatically.</p>
+
+      {err && <LoadError message={err} onRetry={load} />}
+      {!data && !err && <div className="loading">Loading...</div>}
+      {msg && <div role="status" style={{background: "var(--ok-bg)", color: "var(--ok)", borderRadius: 8, padding: "8px 12px", marginBottom: 12, fontSize: 13}}>{msg}</div>}
+
+      {data && (
+        <React.Fragment>
+          <div style={{display: "flex", gap: 12, alignItems: "center", flexWrap: "wrap", marginBottom: 14}}>
+            <div style={{display: "flex", border: "1.5px solid var(--grey-light)", borderRadius: 8, overflow: "hidden"}}>
+              {chip("all", "All")}{chip("Sousse", "Sousse")}{chip("Tunis", "Tunis")}
+            </div>
+            <span style={{fontSize: 13, color: "var(--grey)"}}><strong>{list.length}</strong> on call now · {soon.length} coming up</span>
+          </div>
+
+          {data.team.length > 0 && (
+            <p style={{fontSize: 12, color: "var(--grey)", margin: "0 0 10px"}}>
+              {data.team.map(t => t.name + ": lead for " + t.lead + (t.backup ? ", backup for " + t.backup : "")).join("  ·  ")}
+            </p>
+          )}
+          {data.unassigned > 0 && (
+            <div role="alert" style={{background: "#FDECEC", border: "1px solid #F5C2C2", borderRadius: 8, padding: "8px 12px", marginBottom: 12, fontSize: 13, color: "#991B1B"}}>
+              <strong>{data.unassigned} client{data.unassigned !== 1 ? "s are" : " is"} on call with nobody assigned.</strong> Open their profile → Edit details → choose a Lead.
+            </div>
+          )}
+
+          {list.length === 0 && <div className="card empty-state">Nobody is in the on-call window right now.</div>}
+          {list.map(c => (
+            <div className="card" key={c.id} style={{borderLeft: "4px solid " + (c.pastDue ? "#C0392B" : "var(--magenta)"), marginBottom: 12}}>
+              <div style={{display: "flex", justifyContent: "space-between", gap: 10, alignItems: "flex-start"}}>
+                <div>
+                  <div style={{fontSize: 17, fontWeight: 600}}>{c.name} <span className="badge">{c.city}</span></div>
+                  <div style={{fontSize: 13, color: "var(--grey)"}}>Due {prettyDay(c.dueDate)} · {dueIn(c.daysToDue)}</div>
+                </div>
+                <div style={{textAlign: "right"}}>
+                  <div style={{fontSize: 24, fontWeight: 700, color: c.pastDue ? "#C0392B" : "var(--magenta-dark)"}}>{c.weeks}w{c.days}d</div>
+                  {c.pastDue && <div style={{fontSize: 11, color: "#C0392B", fontWeight: 600}}>PAST 42 WEEKS</div>}
+                </div>
+              </div>
+              <div style={{fontSize: 13, margin: "6px 0"}}>
+                {c.lead ? <span>Lead: <strong>{c.lead}</strong></span> : <span style={{color: "#991B1B", fontWeight: 600}}>Nobody assigned</span>}
+                {c.backup && <span> · Backup: <strong>{c.backup}</strong></span>}
+                {c.others && c.others.length > 0 && <span style={{color: "var(--grey)"}}> · also {c.others.join(", ")}</span>}
+              </div>
+              {c.complications && <div style={{background: "#FFFBEB", border: "1px solid #F6E3A1", borderRadius: 6, padding: "4px 8px", fontSize: 12, color: "#92400E", marginBottom: 6}}>⚠ {c.complications}</div>}
+              <div style={{display: "flex", gap: 8, flexWrap: "wrap"}}>
+                {c.phone && <a className="btn-small" style={{textDecoration: "none"}} href={waLink(c.phone, "Hello " + firstName(c.name) + "! 💛 It's Joyful Birth Services, checking in as you get close to your due date. How are you feeling?")} target="_blank" rel="noopener noreferrer">WhatsApp</a>}
+                {c.phone && <a className="btn-small" style={{textDecoration: "none", background: "var(--grey-light)", color: "var(--grey)"}} href={"tel:+" + waDigits(c.phone)}>Call</a>}
+                <button className="btn-small" style={{background: "var(--grey-light)", color: "var(--grey)"}} onClick={() => setOpen(o => ({ ...o, [c.id]: !o[c.id] }))}>{open[c.id] ? "Hide details" : "Details"}</button>
+                <button className="btn-small" style={{background: "var(--grey-light)", color: "var(--grey)"}} onClick={() => born(c)}>Baby born</button>
+              </div>
+              {open[c.id] && (
+                <div style={{marginTop: 10}}>
+                  {detail("Phone", c.phone)}
+                  {detail("Giving birth at", c.birthPlace)}
+                  {detail("Doctor / midwife", c.provider)}
+                  {detail("Complications", c.complications, true)}
+                  {detail("Emergency contact", c.emergency)}
+                  {detail("Partner", c.partner)}
+                  {detail("Language", c.language)}
+                  {detail("Sessions", c.sessionFormat)}
+                  {detail("Birth preferences", (c.preferences || []).join(", "))}
+                  {detail("Package", c.packageName)}
+                  {detail("Notes", c.notes)}
+                  {!c.birthPlace && !c.provider && !c.emergency && <p style={{fontSize: 12, color: "var(--grey)", margin: "6px 0 0"}}>No intake fiche was found for this phone number, so birth place, doctor and emergency contact aren't shown.</p>}
+                </div>
+              )}
+            </div>
+          ))}
+
+          {soon.length > 0 && (
+            <div className="card">
+              <div className="component-label">Coming up (not yet {data.window.from} weeks)</div>
+              {soon.map(c => (
+                <div key={c.id} style={{display: "flex", justifyContent: "space-between", gap: 10, padding: "6px 0", borderTop: "1px solid var(--grey-light)", fontSize: 13}}>
+                  <span><strong>{c.name}</strong> <span className="badge">{c.city}</span> · due {prettyDay(c.dueDate)}</span>
+                  <span style={{whiteSpace: "nowrap"}}>{c.weeks}w{c.days}d · {c.lead || "nobody assigned"}</span>
+                </div>
+              ))}
+            </div>
+          )}
+
+          {data.needsDate.length > 0 && (
+            <div className="card" style={{background: "#FFFBEB"}}>
+              <div className="component-label">Needs a due date ({data.needsDate.length})</div>
+              <p style={{fontSize: 12, color: "var(--grey)", margin: "2px 0 6px"}}>These doula clients can't appear above until they have a due date. Set it from their profile (Edit details), or use what they wrote on their fiche.</p>
+              {exactFillable > 0 && <button className="btn-small" disabled={busy} onClick={fillAll}>{busy ? "Working..." : "Fill " + exactFillable + " from the fiches"}</button>}
+              {data.needsDate.map(n => (
+                <div key={n.id} style={{display: "flex", justifyContent: "space-between", gap: 10, alignItems: "center", padding: "6px 0", borderTop: "1px solid #F6E3A1", fontSize: 13}}>
+                  <span><strong>{n.name}</strong>{n.raw ? <span style={{color: "var(--grey)"}}> · fiche says “{n.raw}”</span> : <span style={{color: "var(--grey)"}}> · no fiche found</span>}</span>
+                  {n.suggestion
+                    ? <span style={{whiteSpace: "nowrap"}}>{prettyDay(n.suggestion.date)}{n.suggestion.approx ? " (about)" : ""} <button className="btn-small" disabled={busy} onClick={() => useDate(n)}>Use</button></span>
+                    : <span style={{color: "var(--grey)", whiteSpace: "nowrap"}}>enter it in the profile</span>}
+                </div>
+              ))}
+            </div>
+          )}
+        </React.Fragment>
+      )}
+    </div>
+  );
+}
+
+// Who is doing what, where, over the coming week.
+function TeamView({ pin }) {
+  const [data, setData] = useState(null);
+  const [err, setErr] = useState("");
+  const load = () => {
+    setErr("");
+    apiCall({ action: "getTeamBoard", pin }).then(res => {
+      if (res.success) setData(res); else setErr(res.error || "Couldn't load the team board.");
+    }).catch(() => setErr("Couldn't reach the server. Please try again."));
+  };
+  useEffect(() => { load(); }, []);
+
+  const when = (a) => { const d = new Date(a.date + "T12:00:00"); return d.toLocaleDateString("en-GB", { weekday: "short", day: "numeric", month: "short" }) + (a.time ? " " + a.time : ""); };
+  const cityBadge = (c) => <span className="badge" style={c === "Tunis" ? {background: "#E0ECFF", color: "#1E40AF"} : undefined}>{c}</span>;
+  const groups = data ? [["Sousse", data.people.filter(p => p.location === "Sousse")], ["Tunis", data.people.filter(p => p.location === "Tunis")], ["Both cities", data.people.filter(p => p.location !== "Sousse" && p.location !== "Tunis")]].filter(g => g[1].length > 0) : [];
+
+  return (
+    <div>
+      <h1 className="page-title">Team</h1>
+      <p className="page-sub">Who is doing what, and where, over the next 7 days. Appointments carry their city.</p>
+      {err && <LoadError message={err} onRetry={load} />}
+      {!data && !err && <div className="loading">Loading...</div>}
+      {data && (data.unassigned.length > 0 || data.onCallUnassigned.length > 0) && (
+        <div role="alert" style={{background: "#FDECEC", border: "1px solid #F5C2C2", borderRadius: 8, padding: "8px 12px", marginBottom: 14, fontSize: 13, color: "#991B1B"}}>
+          <strong>Nobody assigned yet:</strong>
+          {data.unassigned.map((a, i) => <div key={"u" + i}>{when(a)} · {a.clientName} · {a.service} {cityBadge(a.city)}</div>)}
+          {data.onCallUnassigned.map(c => <div key={c.id}>On call: {c.name} ({c.weeks}w{c.days}d) {cityBadge(c.city)}: choose a lead in her profile</div>)}
+        </div>
+      )}
+      {groups.map(g => (
+        <div key={g[0]} style={{marginBottom: 18}}>
+          <h3 style={{margin: "0 0 8px", color: "var(--magenta-dark)"}}>{g[0]}</h3>
+          {g[1].map(p => (
+            <div className="card" key={p.name} style={{marginBottom: 10}}>
+              <div style={{display: "flex", justifyContent: "space-between", alignItems: "center"}}>
+                <div style={{fontSize: 16, fontWeight: 600}}>{p.name}</div>
+                <span style={{fontSize: 12, color: "var(--grey)"}}>{p.role === "owner" ? "Owner" : "Team"} · {p.location}</span>
+              </div>
+              {(p.onCallLead.length > 0 || p.onCallBackup.length > 0) && (
+                <div style={{fontSize: 13, margin: "6px 0", background: "#FDF2F8", borderRadius: 6, padding: "6px 8px"}}>
+                  {p.onCallLead.length > 0 && <div><strong>On call (lead):</strong> {p.onCallLead.map(c => c.name + " " + c.weeks + "w" + c.days + "d").join(", ")}</div>}
+                  {p.onCallBackup.length > 0 && <div><strong>Backup for:</strong> {p.onCallBackup.map(c => c.name + " " + c.weeks + "w" + c.days + "d").join(", ")}</div>}
+                </div>
+              )}
+              {p.appointments.length === 0 && <div style={{fontSize: 13, color: "var(--grey)", padding: "4px 0"}}>No appointments in the next 7 days.</div>}
+              {p.appointments.map((a, i) => (
+                <div key={i} style={{display: "flex", justifyContent: "space-between", gap: 8, padding: "5px 0", borderTop: "1px solid var(--grey-light)", fontSize: 13}}>
+                  <span><strong>{when(a)}</strong> · {a.clientName} · {a.service}</span>
+                  {cityBadge(a.city)}
+                </div>
+              ))}
+            </div>
+          ))}
+        </div>
+      ))}
+      {data && groups.length === 0 && <div className="card empty-state">No team members to show.</div>}
+    </div>
+  );
+}
+
 function TodayView({ pin, data, onRefresh, onReview, refreshKey }) {
   const [showNew, setShowNew] = useState(false);
   const [clients, setClients] = useState([]);
@@ -1328,12 +1557,27 @@ function TodayView({ pin, data, onRefresh, onReview, refreshKey }) {
     });
   };
 
-  const upcoming = data.upcoming || [];
+  const [cityF, setCityF] = useState("all");
+  const [mineOnly, setMineOnly] = useState(false);
+  const me = (data.staff || {}).name;
+  const allUpcoming = data.upcoming || [];
+  const upcoming = allUpcoming.filter(a => (cityF === "all" || a.city === cityF) && (!mineOnly || a.staff === me));
 
   return (
     <div>
       <h1 className="page-title">Upcoming appointments</h1>
       <p className="page-sub">{upcoming.length > 0 ? upcoming.length + " appointment" + (upcoming.length !== 1 ? "s" : "") + " coming up" : "Everything coming up across your client list"}</p>
+
+      <div style={{display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap", margin: "0 0 12px"}}>
+        <div style={{display: "flex", border: "1.5px solid var(--grey-light)", borderRadius: 8, overflow: "hidden"}}>
+          {[["all", "All cities"], ["Sousse", "Sousse"], ["Tunis", "Tunis"]].map(c => (
+            <button key={c[0]} onClick={() => setCityF(c[0])} style={{padding: "6px 14px", border: "none", cursor: "pointer", fontSize: 13, fontFamily: "inherit", background: cityF === c[0] ? "var(--magenta)" : "transparent", color: cityF === c[0] ? "#fff" : "var(--grey)"}}>{c[1]}</button>
+          ))}
+        </div>
+        <label style={{display: "flex", alignItems: "center", gap: 6, fontSize: 13, cursor: "pointer"}}>
+          <input type="checkbox" checked={mineOnly} onChange={e => setMineOnly(e.target.checked)} /> Only mine ({me})
+        </label>
+      </div>
 
       <NewClientsCard clients={clients} packages={packages} pin={pin} isOwner={(data.staff || {}).role === "owner"} onChanged={reloadClients} />
 
@@ -1366,7 +1610,10 @@ function TodayView({ pin, data, onRefresh, onReview, refreshKey }) {
                 <div className="appt-service">{a.service}</div>
                 <div className="appt-meta">{a.time}{a.location ? " · " + a.location : ""}</div>
               </div>
-              {a.staff && <span className="badge">{a.staff}</span>}
+              <div style={{display: "flex", flexDirection: "column", gap: 4, alignItems: "flex-end"}}>
+                {a.city && <span className="badge" style={a.city === "Tunis" ? {background: "#E0ECFF", color: "#1E40AF"} : undefined}>{a.city}</span>}
+                {a.staff ? <span className="badge">{a.staff}</span> : <span className="badge" style={{background: "#FEF3CD", color: "#92400E"}}>no one assigned</span>}
+              </div>
             </div>
           </div>
         );
@@ -2339,9 +2586,18 @@ function ClientProfileModal({ client, packages, staffList, currentStaff, pin, on
   const [eAssigned, setEAssigned] = useState(client.assignedStaff || []);
   const [eBabyName, setEBabyName] = useState(client.babyName || "");
   const [eBabyDate, setEBabyDate] = useState(client.babyBirthDate || "");
+  const [eDue, setEDue] = useState(client.dueDate || "");
+  const [eOnCall, setEOnCall] = useState(client.onCall === "TRUE" ? "yes" : client.onCall === "FALSE" ? "no" : "auto");
+  const [dueHint, setDueHint] = useState(null);
   const [eBabyWeight, setEBabyWeight] = useState(client.babyWeight || "");
   const [eBabyDetails, setEBabyDetails] = useState(client.babyBirthDetails || "");
   const [savingEdit, setSavingEdit] = useState(false);
+
+  // while editing, offer the due date she wrote on her fiche
+  useEffect(() => {
+    if (!editing || !client.phone) return;
+    apiCall({ action: "getFicheForClient", pin, clientId: client.id }).then(res => { if (res.success && res.dueDateSuggestion) setDueHint(res.dueDateSuggestion); }).catch(() => {});
+  }, [editing]);
 
   useEffect(() => {
     apiCall({ action: "getSuggestedInvoiceNumber", pin }).then(res => {
@@ -2350,6 +2606,16 @@ function ClientProfileModal({ client, packages, staffList, currentStaff, pin, on
   }, [pin]);
 
   const locations = ["Sousse", "Tunis"];
+  // assigned staff are kept in order: first = lead, second = backup, the rest "also involved"
+  const changeLead = (v) => setEAssigned(prev => {
+    const backup = prev[1] && prev[1] !== v ? prev[1] : "";
+    return [v, backup].filter(Boolean).concat(prev.slice(2).filter(n => n !== v && n !== backup));
+  });
+  const changeBackup = (v) => setEAssigned(prev => {
+    const lead = prev[0] || "";
+    if (!lead) return v ? [v] : [];
+    return [lead, v && v !== lead ? v : ""].filter(Boolean).concat(prev.slice(2).filter(n => n !== v && n !== lead));
+  });
   const toggleAssigned = (staffName) => {
     setEAssigned(prev => prev.includes(staffName) ? prev.filter(s => s !== staffName) : [...prev, staffName]);
   };
@@ -2368,6 +2634,8 @@ function ClientProfileModal({ client, packages, staffList, currentStaff, pin, on
       packageId: ePackageId,
       customPrice: eCustomPrice,
       assignedStaff: eAssigned.join(", "),
+      dueDate: eDue,
+      onCall: eOnCall === "yes" ? "TRUE" : eOnCall === "no" ? "FALSE" : "",
       babyName: eBabyName,
       babyBirthDate: eBabyDate,
       babyWeight: eBabyWeight,
@@ -2562,16 +2830,49 @@ function ClientProfileModal({ client, packages, staffList, currentStaff, pin, on
 
           {staffList && staffList.length > 0 && (
             <div className="form-group">
-              <label className="form-label">Assigned staff</label>
-              <div className="assign-chips">
-                {staffList.map(s => (
-                  <span key={s.name} className={"assign-chip" + (eAssigned.includes(s.name) ? " on" : "")} onClick={() => toggleAssigned(s.name)}>
-                    {s.name}
-                  </span>
-                ))}
+              <label className="form-label">Who looks after her</label>
+              <div style={{display: "flex", gap: 10, flexWrap: "wrap"}}>
+                <div style={{flex: "1 1 160px"}}>
+                  <div style={{fontSize: 11, color: "var(--grey)", marginBottom: 2}}>Lead (first on call)</div>
+                  <select className="form-select" value={eAssigned[0] || ""} onChange={e => changeLead(e.target.value)}>
+                    <option value="">Nobody yet</option>
+                    {staffList.map(s => <option key={s.name} value={s.name}>{s.name} ({s.location})</option>)}
+                  </select>
+                </div>
+                <div style={{flex: "1 1 160px"}}>
+                  <div style={{fontSize: 11, color: "var(--grey)", marginBottom: 2}}>Backup</div>
+                  <select className="form-select" value={eAssigned[1] || ""} onChange={e => changeBackup(e.target.value)}>
+                    <option value="">No backup</option>
+                    {staffList.filter(s => s.name !== eAssigned[0]).map(s => <option key={s.name} value={s.name}>{s.name} ({s.location})</option>)}
+                  </select>
+                </div>
               </div>
+              {eAssigned.length > 2 && <p style={{fontSize: 11, color: "var(--grey)", marginTop: 4}}>Also involved: {eAssigned.slice(2).join(", ")}</p>}
             </div>
           )}
+
+          <div style={{borderTop: "1px solid var(--grey-light)", margin: "18px 0", paddingTop: 14}}>
+            <div className="component-label" style={{marginBottom: 10}}>Pregnancy &amp; on call</div>
+            <div className="form-group">
+              <label className="form-label">Expected due date</label>
+              <input className="form-input" type="date" value={eDue} onChange={e => setEDue(e.target.value)} />
+              {eDue && <p style={{fontSize: 12, color: "var(--grey)", marginTop: 4}}>{gestationText(eDue) ? "Today she is " + gestationText(eDue) + " pregnant." : "That date is more than 40 weeks away."}</p>}
+              {dueHint && dueHint.date !== eDue && (
+                <p style={{fontSize: 12, marginTop: 4}}>
+                  Her fiche says “{dueHint.raw}” ({prettyDay(dueHint.date)}{dueHint.approx ? ", about" : ""}).{" "}
+                  <span style={{color: "var(--magenta-dark)", textDecoration: "underline", cursor: "pointer"}} onClick={() => setEDue(dueHint.date)}>Use this date</span>
+                </p>
+              )}
+            </div>
+            <div className="form-group">
+              <label className="form-label">On call for the birth</label>
+              <select className="form-select" value={eOnCall} onChange={e => setEOnCall(e.target.value)}>
+                <option value="auto">Automatic (yes when the package includes the birth)</option>
+                <option value="yes">Yes, on call</option>
+                <option value="no">No, not on call</option>
+              </select>
+            </div>
+          </div>
 
           <div style={{borderTop: "1px solid var(--grey-light)", margin: "18px 0", paddingTop: 14}}>
             <div className="component-label" style={{marginBottom: 10}}>Baby's birth (after delivery)</div>
@@ -2649,8 +2950,13 @@ function ClientProfileModal({ client, packages, staffList, currentStaff, pin, on
             {client.phone && <p className="page-sub" style={{marginTop: 0, marginBottom: 2}}>{client.phone}</p>}
             <p className="page-sub" style={{marginTop: 0}}>
               {client.location}
-              {client.assignedStaff && client.assignedStaff.length > 0 ? " · " + client.assignedStaff.join(", ") : ""}
+              {client.assignedStaff && client.assignedStaff.length > 0 ? " · Lead: " + client.assignedStaff[0] + (client.assignedStaff[1] ? " · Backup: " + client.assignedStaff[1] : "") + (client.assignedStaff.length > 2 ? " · also " + client.assignedStaff.slice(2).join(", ") : "") : " · nobody assigned"}
             </p>
+            {client.dueDate && !client.babyBirthDate && (
+              <p className="page-sub" style={{marginTop: 0, color: "var(--magenta-dark)", fontWeight: 600}}>
+                Due {prettyDay(client.dueDate)}{gestationText(client.dueDate) ? " · " + gestationText(client.dueDate) : ""}
+              </p>
+            )}
           </div>
           <div style={{display: "flex", flexDirection: "column", gap: 6}}>
             <button className="btn-small" style={{background: "var(--grey-light)", color: "var(--grey)"}} onClick={() => setEditing(true)}>Edit details</button>
@@ -3149,7 +3455,7 @@ function RecordPaymentsModal({ clients, pin, onClose, onChanged }) {
   );
 }
 
-function ClientsView({ pin, currentStaff, autoOpen, onAutoOpened }) {
+function ClientsView({ pin, currentStaff, autoOpen, onAutoOpened, unlinked }) {
   const [search, setSearch] = useState("");
   const [sortBy, setSortBy] = useState("name-az");
   const [fStatus, setFStatus] = useState("all");
@@ -3165,6 +3471,8 @@ function ClientsView({ pin, currentStaff, autoOpen, onAutoOpened }) {
   const [showMerge, setShowMerge] = useState(false);
   const [showLink, setShowLink] = useState(false);
   const [showPay, setShowPay] = useState(false);
+  const [showAdd, setShowAdd] = useState(false);       // "+ Add client": the one door for new people
+  const [showTools, setShowTools] = useState(false);   // "Tidy up" menu
   // The Today banner can send the user straight to the right window.
   useEffect(() => {
     if (!autoOpen) return;
@@ -3260,18 +3568,42 @@ function ClientsView({ pin, currentStaff, autoOpen, onAutoOpened }) {
       <h1 className="page-title">Clients</h1>
       <p className="page-sub">{clients.length} client{clients.length !== 1 ? "s" : ""} on file</p>
 
-      <button className="add-client-btn" onClick={() => setShowNewClient(true)}>+ New client</button>
-      <button className="add-client-btn" style={{background: "var(--grey-light)", color: "var(--grey)", marginLeft: 8}} onClick={() => setShowImport(true)}>Import from bookings/fiches</button>
-      <button className="add-client-btn" style={{background: "var(--grey-light)", color: "var(--grey)", marginLeft: 8}} onClick={() => printClientList()}>Print list</button>
-      {currentStaff && currentStaff.role === "owner" && (
-        <button className="add-client-btn" style={{background: "var(--grey-light)", color: "var(--grey)", marginLeft: 8}} onClick={() => setShowMerge(true)}>Consolidate duplicates</button>
-      )}
-      {currentStaff && currentStaff.role === "owner" && (
-        <button className="add-client-btn" style={{background: "var(--grey-light)", color: "var(--grey)", marginLeft: 8}} onClick={() => setShowLink(true)}>Link bookings to clients</button>
-      )}
-      {currentStaff && currentStaff.role === "owner" && clients.some(c => String(c.status || "").toLowerCase() !== "new" && Number(c.balance) > 0.0005) && (
-        <button className="add-client-btn" style={{background: "var(--grey-light)", color: "var(--grey)", marginLeft: 8}} onClick={() => setShowPay(true)}>Record unentered payments</button>
-      )}
+      {(() => {
+        const isOwnerHere = currentStaff && currentStaff.role === "owner";
+        const owing = isOwnerHere && clients.some(c => String(c.status || "").toLowerCase() !== "new" && Number(c.balance) > 0.0005);
+        const unlinkedCount = (unlinked && unlinked.bookings) || 0;
+        const items = [
+          isOwnerHere && { key: "merge", title: "Check for duplicates", note: "Find people who have two profiles and join them.", run: () => setShowMerge(true) },
+          isOwnerHere && { key: "link", title: "Connect bookings to clients", note: "Attach each booking to the right profile." + (unlinkedCount > 0 ? " " + unlinkedCount + " still unconnected." : ""), badge: unlinkedCount, run: () => setShowLink(true) },
+          owing && { key: "pay", title: "Record payments not yet entered", note: "For clients who show a balance but have paid.", run: () => setShowPay(true) },
+          { key: "import", title: "Import people from bookings and forms", note: "Create profiles for people who booked or filled in a form.", run: () => setShowImport(true) },
+          { key: "print", title: "Print the client list", note: "A printable list of everyone shown below.", run: () => printClientList() }
+        ].filter(Boolean);
+        const dot = unlinkedCount > 0 && isOwnerHere;
+        return (
+          <div style={{display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap", margin: "0 0 14px", position: "relative"}}>
+            <button className="add-client-btn" style={{margin: 0}} onClick={() => { setShowTools(false); setShowAdd(true); }}>+ Add client</button>
+            <div style={{position: "relative"}}>
+              <button className="add-client-btn" style={{margin: 0, background: "var(--grey-light)", color: "var(--grey)"}} onClick={() => setShowTools(t => !t)}>
+                Tidy up ▾{dot && <span style={{display: "inline-block", width: 8, height: 8, borderRadius: "50%", background: "var(--magenta)", marginLeft: 6}} />}
+              </button>
+              {showTools && (
+                <React.Fragment>
+                  <div style={{position: "fixed", inset: 0, zIndex: 40}} onClick={() => setShowTools(false)} />
+                  <div style={{position: "absolute", top: "calc(100% + 6px)", left: 0, zIndex: 50, background: "#fff", border: "1.5px solid var(--grey-light)", borderRadius: 12, boxShadow: "0 8px 24px rgba(0,0,0,0.12)", minWidth: 300, maxWidth: 340, padding: 6}}>
+                    {items.map(it => (
+                      <div key={it.key} style={{padding: "10px 12px", borderRadius: 8, cursor: "pointer"}} onMouseEnter={e => { e.currentTarget.style.background = "#F8F7F7"; }} onMouseLeave={e => { e.currentTarget.style.background = "transparent"; }} onClick={() => { setShowTools(false); it.run(); }}>
+                        <div style={{fontSize: 14, fontWeight: 600}}>{it.title}{it.badge > 0 && <span style={{marginLeft: 8, fontSize: 11, background: "var(--magenta)", color: "#fff", borderRadius: 10, padding: "1px 7px"}}>{it.badge}</span>}</div>
+                        <div style={{fontSize: 12, color: "var(--grey)"}}>{it.note}</div>
+                      </div>
+                    ))}
+                  </div>
+                </React.Fragment>
+              )}
+            </div>
+          </div>
+        );
+      })()}
 
       {importMsg && (
         <div style={{background: "var(--ok-bg)", color: "var(--ok)", borderRadius: 8, padding: "10px 14px", marginBottom: 14, fontSize: 13}}>
@@ -3361,6 +3693,25 @@ function ClientsView({ pin, currentStaff, autoOpen, onAutoOpened }) {
         />
       )}
 
+      {showAdd && (
+        <div className="modal-overlay" onClick={() => setShowAdd(false)}>
+          <div className="modal-box" style={{maxWidth: 480}} onClick={e => e.stopPropagation()}>
+            <h2>Add a client</h2>
+            <p className="page-sub" style={{marginBottom: 12}}>People who book on the website or fill in a form appear on <strong>Today</strong> by themselves; you only choose their package there. Use this for everyone else.</p>
+            <div style={{display: "flex", flexDirection: "column", gap: 10}}>
+              <div style={{border: "1.5px solid var(--grey-light)", borderRadius: 12, padding: "14px 16px", cursor: "pointer"}} onClick={() => { setShowAdd(false); setShowImport(true); }}>
+                <div style={{fontSize: 15, fontWeight: 600}}>Someone who booked or filled in a form</div>
+                <div style={{fontSize: 12, color: "var(--grey)"}}>Pick them from the list. Their details are already filled in.</div>
+              </div>
+              <div style={{border: "1.5px solid var(--magenta)", borderRadius: 12, padding: "14px 16px", cursor: "pointer", background: "#FDF2F8"}} onClick={() => { setShowAdd(false); setShowNewClient(true); }}>
+                <div style={{fontSize: 15, fontWeight: 600}}>Someone new</div>
+                <div style={{fontSize: 12, color: "var(--grey)"}}>Type her name, phone and package yourself (I'll warn you if she already has a profile).</div>
+              </div>
+            </div>
+            <button className="btn-secondary" style={{marginTop: 12}} onClick={() => setShowAdd(false)}>Cancel</button>
+          </div>
+        </div>
+      )}
       {showNewClient && (
         <NewClientModal
           pin={pin}
@@ -5088,6 +5439,12 @@ function Dashboard({ staff, pin, onLogout }) {
         <div className={"nav-item" + (view === "messages" ? " active" : "")} onClick={() => setView("messages")}>
           Messages
         </div>
+        <div className={"nav-item" + (view === "oncall" ? " active" : "")} onClick={() => setView("oncall")}>
+          On call
+        </div>
+        <div className={"nav-item" + (view === "team" ? " active" : "")} onClick={() => setView("team")}>
+          Team
+        </div>
         {staff.role === "owner" && (
           <div className={"nav-item" + (view === "daysoff" ? " active" : "")} onClick={() => setView("daysoff")}>
             Days off
@@ -5126,7 +5483,9 @@ function Dashboard({ staff, pin, onLogout }) {
         {data && view === "groups" && <GroupClassesView pin={pin} currentStaff={staff} />}
         {data && view === "daysoff" && staff.role === "owner" && <DaysOffView pin={pin} />}
         {data && view === "messages" && <MessagesView pin={pin} />}
-        {data && view === "clients" && <ClientsView pin={pin} currentStaff={staff} autoOpen={clientsOpen} onAutoOpened={() => setClientsOpen(null)} />}
+        {data && view === "oncall" && <OnCallView pin={pin} />}
+        {data && view === "team" && <TeamView pin={pin} />}
+        {data && view === "clients" && <ClientsView pin={pin} currentStaff={staff} autoOpen={clientsOpen} onAutoOpened={() => setClientsOpen(null)} unlinked={data.unlinked} />}
         {data && view === "invoice" && <InvoicesHub pin={pin} />}
         {data && view === "caisse" && <CaisseView pin={pin} staff={staff} />}
         {data && view === "reports" && staff.role === "owner" && <ReportsHub pin={pin} />}
