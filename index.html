@@ -73,8 +73,10 @@ const TR={
     dshrt:["Su","Mo","Tu","We","Th","Fr","Sa"],
     fmtDate:fmtEN,fmtTime:fmtT,
     loading:"Loading...",bookTitle:"Book an appointment",bookSub:"Choose the service you'd like to book:",
+    cityTitle:"Where would you like to be seen?",cityPick:"Choose your city to see what is available.",cityNow:"Booking in",cityChange:"Change city",
+    staffLbl:"With whom?",anyStaff:"First available",staffNone:"This team member is not available on that day.",withLbl:"With",pumpGone:"Sorry, that pump has just been rented out. Please choose another one.",
     book:"Book",chooseOpt:"Choose an option",chooseDate:"Choose a date & time",
-    noSlots:"No available slots for this day.",slotsErr:"We couldn't check which times are free right now.",retry:"Try again",closedDay:"Joy isn't available on this day. Please choose another date.",slotTaken:"Sorry, that time was just taken. Please choose another time.",busyTry:"The booking system is busy for a moment. Please press Confirm again.",cont:"Continue",yourDetails:"Your details",
+    noSlots:"No available slots for this day.",slotsErr:"We couldn't check which times are free right now.",retry:"Try again",closedDay:"We aren't available on this day. Please choose another date.",slotTaken:"Sorry, that time was just taken. Please choose another time.",busyTry:"The booking system is busy for a moment. Please press Confirm again.",cont:"Continue",yourDetails:"Your details",
     whereAppt:"Where would you like your appointment? *",
     locOffice:"Your office",locOfficeSub:"I'll come to you",
     locHome:"My home",locHomeSub:"Home visit",
@@ -129,8 +131,10 @@ const TR={
     dshrt:["Di","Lu","Ma","Me","Je","Ve","Sa"],
     fmtDate:fmtFR,fmtTime:function(t){return t||"";},
     loading:"Chargement...",bookTitle:"Prendre un rendez-vous",bookSub:"Choisissez le service que vous souhaitez r\xe9server :",
+    cityTitle:"O\xf9 souhaitez-vous \xeatre re\xe7ue ?",cityPick:"Choisissez votre ville pour voir les disponibilit\xe9s.",cityNow:"R\xe9servation \xe0",cityChange:"Changer de ville",
+    staffLbl:"Avec qui ?",anyStaff:"Premi\xe8re disponible",staffNone:"Cette personne n\u2019est pas disponible ce jour-l\xe0.",withLbl:"Avec",pumpGone:"D\xe9sol\xe9, ce tire-lait vient d\u2019\xeatre lou\xe9. Veuillez en choisir un autre.",
     book:"R\xe9server",chooseOpt:"Choisissez une option",chooseDate:"Choisissez une date et une heure",
-    noSlots:"Aucun cr\xe9neau disponible ce jour.",slotsErr:"Impossible de v\xe9rifier les horaires disponibles pour le moment.",retry:"R\xe9essayer",closedDay:"Joy n\u2019est pas disponible ce jour-l\xe0. Veuillez choisir une autre date.",slotTaken:"D\xe9sol\xe9, cet horaire vient d\u2019\xeatre pris. Veuillez en choisir un autre.",busyTry:"Le syst\xe8me est occup\xe9 un instant. Veuillez appuyer \xe0 nouveau sur Confirmer.",cont:"Continuer",yourDetails:"Vos coordonn\xe9es",
+    noSlots:"Aucun cr\xe9neau disponible ce jour.",slotsErr:"Impossible de v\xe9rifier les horaires disponibles pour le moment.",retry:"R\xe9essayer",closedDay:"Nous ne sommes pas disponibles ce jour-l\xe0. Veuillez choisir une autre date.",slotTaken:"D\xe9sol\xe9, cet horaire vient d\u2019\xeatre pris. Veuillez en choisir un autre.",busyTry:"Le syst\xe8me est occup\xe9 un instant. Veuillez appuyer \xe0 nouveau sur Confirmer.",cont:"Continuer",yourDetails:"Vos coordonn\xe9es",
     whereAppt:"O\xf9 souhaitez-vous le rendez-vous ? *",
     locOffice:"Cabinet",locOfficeSub:"Je me d\xe9place chez vous",
     locHome:"Domicile",locHomeSub:"Visite \xe0 domicile",
@@ -269,6 +273,39 @@ const SVC={
   },
 };
 
+// In Tunis the signature programme is sold as the "JBS Tunis" method (the dashboard's invoices read "JBS Tunis" and
+// print "Services de doula de naissance"). The insurance version is arranged privately, not booked online.
+const SVC_CITY={
+  Tunis:{
+    s2:Object.assign({},SVC.s2,{
+      en:{name:"Childbirth Education Class",desc:"For clients of the JBS Tunis Method: book your childbirth classes here."},
+      fr:{name:"Cours de préparation à l'accouchement",desc:"Pour les clientes de la Méthode JBS Tunis : réservez ici vos cours de préparation."},
+    }),
+    s6:{
+      en:{name:"JBS Tunis Method",desc:"Our signature programme in Tunis - childbirth education plus birth doula support for a confident, supported birth."},
+      fr:{name:"M\u00e9thode JBS Tunis",desc:"Notre programme signature \u00e0 Tunis - pr\u00e9paration \u00e0 la naissance et accompagnement de doula pour une naissance confiante et bien accompagn\u00e9e."},
+      returningClient:true,
+      pkgs:{
+        en:[
+          {id:"p1",label:"JBS Tunis Full Method",sub:"Childbirth education classes + birth doula support + postpartum support",dur:90,price:1250},
+          {id:"p2",label:"JBS Tunis Doula Only", sub:"Birth doula support (for clients who already took childbirth classes)",dur:90,price:1000},
+        ],
+        fr:[
+          {id:"p1",label:"JBS Tunis M\u00e9thode compl\u00e8te",sub:"Cours de pr\u00e9paration + accompagnement de doula + soutien post-partum",dur:90,price:1250},
+          {id:"p2",label:"JBS Tunis Doula seule",sub:"Accompagnement de doula (pour les clientes ayant d\u00e9j\u00e0 suivi les cours)",dur:90,price:1000},
+        ],
+      },
+    },
+  },
+};
+// What the page assumes until the booking system answers (the server always has the last word):
+const DEF_CFG={defaultCity:"Sousse",pumpNames:{ps1:"Spectra S1",ps2:"Spectra S2"},
+  cities:{
+    Sousse:{label:"Sousse",services:["s1","s2","s3","s4","s5","s6"],returningOnly:[],guests:{},pumps:{ps1:1,ps2:2},staff:["Joy"],hours:Object.fromEntries([0,1,2,3,4,5,6].map(i=>[i,{enabled:i>=1&&i<=5,start:"09:00",end:"17:00"}]))},
+    Tunis: {label:"Tunis", services:["s2","s3","s4","s6"],returningOnly:["s2"],guests:{Joy:[]},pumps:{ps1:1,ps2:2},staff:["Joy","Margit","Christine"],hours:Object.fromEntries([0,1,2,3,4,5,6].map(i=>[i,{enabled:i>=1&&i<=5,start:"09:00",end:"17:00"}]))},
+  }};
+const CITY_NAMES=["Sousse","Tunis"];
+
 // -- DEFAULTS ------------------------------------------------------
 const HARDCODED_SCRIPT_URL="https://script.google.com/macros/s/AKfycbzaWzdELvCaZnIEPUE4JgQJAJNR5Et5bc_uKuMPcpT9BvtK3yo9lxH1r8Z-7ph0R6il/exec";
 const mkAvl=(days,s,e)=>Object.fromEntries([0,1,2,3,4,5,6].map(i=>[i,{enabled:days.includes(i),times:[{start:s,end:e}]}]));
@@ -352,6 +389,9 @@ function syncToBackend(booking,scriptUrl){
       tf:booking.transportFee||0,
       pm:booking.pumpName||"",
       pi:booking.pumpId||"",
+      si:booking.serviceId||"",
+      ct:booking.city||"",
+      sf:booking.staffPref||"",
       pr:booking.price||0,
       nt:booking.notes||"",
       lg:booking.lang||"en",
@@ -368,7 +408,7 @@ function syncToBackend(booking,scriptUrl){
       .then(function(result){
         if(!result||result.success!==true){
           var failure=new Error((result&&result.error)||"The booking could not be saved.");
-          if(result&&result.conflict)failure.conflict=result.conflict;      // "taken" or "closed": the slot is not available any more
+          if(result&&result.conflict)failure.conflict=result.conflict;      // "taken", "closed", "hours", "staff" or "pump": the slot is not available any more
           if(result&&result.busyTryAgain)failure.busy=true;                  // the server was busy with another booking: nothing was saved
           throw failure;
         }
@@ -414,7 +454,19 @@ function App(){
   const[serverBusy,setServerBusy]=useState([]);      // busy time ranges {start,end} (minutes) for the chosen date
   const[dayClosed,setDayClosed]=useState(false);     // the chosen date is closed (a day off)
   const[slotsError,setSlotsError]=useState(false);   // the availability check failed: ask to retry instead of guessing
-  const[closedDays,setClosedDays]=useState({});      // dates closed in the month on screen
+  const[closedDays,setClosedDays]=useState({});      // dates closed in the month on screen (for the chosen city)
+  const[awayDays,setAwayDays]=useState({});          // {staffName:{date:true}}: days each person is away in the month on screen
+  const[cfg,setCfg]=useState(DEF_CFG);               // cities, hours, services, stock and team (from the booking system)
+  const[city,setCity]=useState(function(){
+    // a link such as ...?city=Tunis opens straight on that city; otherwise the visitor's last choice
+    try{var q=new URLSearchParams(window.location.search).get("city");if(q){q=q.charAt(0).toUpperCase()+q.slice(1).toLowerCase();if(CITY_NAMES.indexOf(q)>=0)return q;}}catch(e){}
+    var saved=sto.get("jbs_city");return CITY_NAMES.indexOf(saved)>=0?saved:null;
+  });
+  const[selStaff,setSelStaff]=useState("any");       // "any" (first available) or one person's name
+  const[staffBusyMap,setStaffBusyMap]=useState({});  // for the chosen date: {name:[{start,end}]}
+  const[cityBusy,setCityBusy]=useState([]);          // for the chosen date: ranges that block everyone in the city
+  const[bookedBy,setBookedBy]=useState("");          // who the server gave the booking to (shown on the confirmation)
+  const[aCity,setACity]=useState("all");             // admin: which city's bookings to show
   const[slotNotice,setSlotNotice]=useState("");      // e.g. "that time was just taken"
   // Admin key: protects the full booking list. Kept only for this browser tab (sessionStorage),
   // never in the page's code. The public pages never send it.
@@ -428,19 +480,31 @@ function App(){
 
   const tr=TR[lang];
 
+  var cityCfg=function(c){return (cfg.cities&&cfg.cities[c||city])||DEF_CFG.cities[c||city]||DEF_CFG.cities.Sousse;};
+  var svcCfg=function(id){return (city&&SVC_CITY[city]&&SVC_CITY[city][id])||SVC[id];};
+  var cityTeam=function(){
+    if(!city)return [];
+    var guests=cityCfg().guests||{};
+    var sid=selSvc?selSvc.id:"";
+    return (cityCfg().staff||[]).filter(function(n){return !guests[n]||guests[n].indexOf(sid)>=0;});
+  };
+  var returningOnlyHere=function(id){return (cityCfg().returningOnly||[]).indexOf(id)>=0;};
+  var cityServices=function(){return city?svcs.filter(function(x){return (cityCfg().services||[]).indexOf(x.id)>=0;}):[];};
+  var hoursFor=function(ds){var p=ds.split("-").map(Number);var h=(cityCfg().hours||{})[new Date(p[0],p[1]-1,p[2]).getDay()];return h&&h.enabled?{enabled:true,times:[{start:h.start,end:h.end}]}:{enabled:false,times:[]};};
   const svcL=svc=>{
-    var c=SVC[svc.id];
+    var c=svcCfg(svc.id);
     if(!c)return{name:svc.name||svc.id,desc:svc.desc||"",pkgs:null};
     var lc=c[lang]||c.en;
     return{name:lc.name,desc:lc.desc,pkgs:c.pkgs?(c.pkgs[lang]||c.pkgs.en):null};
   };
 
-  const actPumpCnt=function(pumpId){
+  const actPumpCnt=function(pumpId,forCity){
     var pump=(sett.pumpInventory||[]).filter(function(p){return p.id===pumpId;})[0];
     if(!pump)return 0;
     var names=[pump.name,pump.nameFr].filter(Boolean);
     return books.filter(function(b){
       if(b.status!=="confirmed")return false;
+      if((b.city||"Sousse")!==(forCity||city||"Sousse"))return false;   // each city counts only its own pumps
       if(b.pumpId===pumpId)return true;
       if(b.pumpName&&names.indexOf(b.pumpName)>=0)return true;
       // Also match by serviceName being Pump Rental and pumpName set
@@ -448,7 +512,8 @@ function App(){
       return false;
     }).length;
   };
-  const pumpFree=pump=>(pump.total||0)-actPumpCnt(pump.id);
+  const pumpStock=function(pump,forCity){var c=forCity||city||"Sousse";var n=((cityCfg(c).pumps)||{})[pump.id];return n===undefined?((pump.stock||{})[c]||0):n;};
+  const pumpFree=function(pump,forCity){return pumpStock(pump,forCity)-actPumpCnt(pump.id,forCity);};
 
   useEffect(()=>{
     var savedSvcs=sto.get("jbs_sv")||[];
@@ -466,6 +531,12 @@ function App(){
     setSvcs(merged);setAvail(av);setSett(Object.assign({},DEF_SETT,st));
     setStoOk(sto.set("jbs_test","1"));
     setReady(true);
+    // The team, hours, services and pump stock come from the booking system so they can never differ between devices.
+    // If it cannot be reached the built-in defaults are used (the server still refuses anything that is not free).
+    fetch(HARDCODED_SCRIPT_URL+"?action=config",{method:"GET",cache:"no-cache"})
+      .then(function(r){return r.json();})
+      .then(function(d){if(d&&d.cities&&!d.error)setCfg(d);})
+      .catch(function(){});
   },[]);
 
   // While the date picker is open, ask which days of the month are closed (days off) and grey them out.
@@ -476,7 +547,7 @@ function App(){
     var p2=function(n){return(n<10?"0":"")+n;};
     var from=y+"-"+p2(m+1)+"-01",to=y+"-"+p2(m+1)+"-"+p2(new Date(y,m+1,0).getDate());
     var stale=false;
-    fetch(HARDCODED_SCRIPT_URL+"?action=closed&from="+from+"&to="+to,{method:"GET",cache:"no-cache"})
+    fetch(HARDCODED_SCRIPT_URL+"?action=closed&city="+encodeURIComponent(city||"Sousse")+"&from="+from+"&to="+to,{method:"GET",cache:"no-cache"})
       .then(function(r){return r.json();})
       .then(function(d){
         if(stale||!d||!d.closed)return;
@@ -486,10 +557,16 @@ function App(){
           d.closed.forEach(function(k){next[k]=true;});
           return next;
         });
+        setAwayDays(function(prev){
+          var next={};
+          Object.keys(prev).forEach(function(n){next[n]={};Object.keys(prev[n]).forEach(function(k){if(k.slice(0,7)!==from.slice(0,7))next[n][k]=true;});});
+          Object.keys(d.staffAway||{}).forEach(function(n){next[n]=next[n]||{};(d.staffAway[n]||[]).forEach(function(k){next[n][k]=true;});});
+          return next;
+        });
       })
       .catch(function(){});
     return function(){stale=true;};
-  },[view,calMo]);
+  },[view,calMo,city]);
 
   const showToast=msg=>{setToast(msg);setTimeout(()=>setToast(""),2500);};
   const saveSvcs =v=>{setSvcs(v); sto.set("jbs_sv",v);};
@@ -560,7 +637,7 @@ function App(){
   var yr=calMo.getFullYear(),mo=calMo.getMonth(),TDY=todayStr();
   var dIM=new Date(yr,mo+1,0).getDate(),fDay=new Date(yr,mo,1).getDay();
   var effAvl=svc=>svc&&svc.customAvail?svc.customAvail:avail;
-  var dayOk=(ds,svc)=>{var parts=ds.split("-").map(Number);return effAvl(svc)[new Date(parts[0],parts[1]-1,parts[2]).getDay()].enabled;};
+  var dayOk=(ds,svc)=>hoursFor(ds).enabled;
 
   // Fetch booked times for a date from the server (Google Sheet + Calendar)
   var fetchServerBooked=function(ds){
@@ -570,12 +647,14 @@ function App(){
     setSlotsLoading(true);setSlotsError(false);
     var controller=new AbortController();
     var timer=setTimeout(function(){controller.abort();},30000);
-    fetch(url+"?action=slots&date="+ds,{method:"GET",cache:"no-cache",signal:controller.signal})
+    fetch(url+"?action=slots&city="+encodeURIComponent(city||"Sousse")+"&date="+ds,{method:"GET",cache:"no-cache",signal:controller.signal})
       .then(function(r){if(!r.ok)throw new Error("HTTP "+r.status);return r.json();})
       .then(function(d){
         if(myReq!==slotsReqId)return;   // an older answer for a date the visitor has already left
-        if(!d||d.error||!(d.busy||d.booked))throw new Error((d&&d.error)||"unreadable answer");
-        setServerBooked(d.booked||[]);setServerBusy(d.busy||[]);setDayClosed(!!d.closed);
+        if(!d||d.error||!(d.busy||d.booked||d.cityBusy))throw new Error((d&&d.error)||"unreadable answer");
+        // (a booking system that is not updated yet only knows "busy": it is then treated as blocking everyone)
+        setServerBooked(d.cityBusy?[]:(d.booked||[]));setServerBusy(d.cityBusy?[]:(d.busy||[]));
+        setCityBusy(d.cityBusy||[]);setStaffBusyMap(d.staffBusy||{});setDayClosed(!!d.closed);
         setSlotsLoading(false);
       })
       .catch(function(){
@@ -589,17 +668,27 @@ function App(){
   var getSlots=ds=>{
     if(!ds||!selSvc||dayClosed||slotsError)return[];
     var parts=ds.split("-").map(Number);
-    var da=effAvl(selSvc)[new Date(parts[0],parts[1]-1,parts[2]).getDay()];
+    var da=hoursFor(ds);
     if(!da||!da.enabled)return[];
-    // Use only server-side booked times (from Sheet + Google Calendar)
+    // Use only server-side busy times (from the Sheet, the city's Calendar, days off and staff away)
     var allBooked=serverBooked;
     var dur=selPkg?selPkg.dur:selSvc.dur;
+    var team=cityTeam();
+    // free for a person = their own appointments, away time and the whole-city blocks all miss it
+    var personFree=function(n,c){return !(staffBusyMap[n]||[]).some(function(b){return c<b.end&&b.start<c+dur;});};
     var sl=[];
     var nowD=new Date(),nowMin=ds===TDY?nowD.getHours()*60+nowD.getMinutes():-1;
     da.times.forEach(function(t){var c=toMin(t.start);while(c+dur<=toMin(t.end)){
       var ts=fromMin(c);
       // free only if the WHOLE appointment (start to start+duration) clears everything already busy
-      var clash=allBooked.indexOf(ts)>=0||serverBusy.some(function(b){return c<b.end&&b.start<c+dur;});
+      var clash=allBooked.indexOf(ts)>=0
+        ||serverBusy.some(function(b){return c<b.end&&b.start<c+dur;})
+        ||cityBusy.some(function(b){return c<b.end&&b.start<c+dur;});
+      if(!clash&&team.length){
+        // somebody has to be free: the one chosen, or anybody in the team for "first available"
+        var cands=selStaff==="any"?team:[selStaff];
+        clash=!cands.some(function(n){return personFree(n,c);});
+      }
       if(!clash&&c>nowMin)sl.push(ts);
       c+=30;}});
     return sl;
@@ -612,7 +701,7 @@ function App(){
     var zones=sett.transportZones||[];
     var isDel=selSvc&&selSvc.hasDelivery&&form.delChoice==="delivery";
     var zone=(form.location==="home"||isDel)?zones.filter(z=>z.id===form.zoneId)[0]:null;
-    var sc=SVC[selSvc.id]||{};
+    var sc=svcCfg(selSvc.id)||{};
     var frPkgs=(sc.pkgs&&sc.pkgs.fr)||[];
     var pump=(sett.pumpInventory||[]).filter(p=>p.id===form.pumpId)[0];
     var pumpNameStr=pump?pump.name:"";
@@ -642,20 +731,27 @@ function App(){
       pumpName:pumpNameStr||null,
       price:ep,
       total:ep+(zone?zone.fee:0),
+      city:city||"Sousse",staffPref:selStaff||"any",
       status:"confirmed",lang:lang,
       createdAt:new Date().toISOString(),
     };
     try{
       // Wait for the server to confirm the booking is saved BEFORE showing "confirmed".
-      await syncToBackend(nb,sett.scriptUrl);
-      setBooks(function(previous){return previous.concat([nb]);});
+      var saved=await syncToBackend(nb,sett.scriptUrl);
+      setBookedBy((saved&&saved.staff)||"");
+      setBooks(function(previous){return previous.concat([Object.assign({},nb,{staff:(saved&&saved.staff)||""})]);});
       setView("done");
     }catch(error){
       console.error("Booking confirmation failed:",error);
+      if(error&&error.conflict==="pump"){
+        setBookingError(tr.pumpGone);setForm(function(f){return Object.assign({},f,{pumpId:null});});
+        fetchAllBookings(true);
+        return;
+      }
       if(error&&error.conflict){
         // Someone else took the slot (or the day closed) while this visitor was filling in the form.
-        setSelTime(null);setServerBusy([]);setServerBooked([]);setDayClosed(false);setSlotsError(false);
-        setSlotNotice(error.conflict==="closed"?tr.closedDay:tr.slotTaken);
+        setSelTime(null);setServerBusy([]);setServerBooked([]);setCityBusy([]);setStaffBusyMap({});setDayClosed(false);setSlotsError(false);
+        setSlotNotice(error.conflict==="closed"?tr.closedDay:error.conflict==="staff"?tr.staffNone:tr.slotTaken);
         fetchServerBooked(selDate);
         setView("dt");
         return;
@@ -675,6 +771,10 @@ function App(){
   };
   var resetFlow=()=>{
     setForm({name:"",phone:"",email:"",notes:"",location:"office",zoneId:null,delChoice:null,pumpId:null});
+    setSelSvc(null);setSelPkg(null);setSelDate(null);setSelTime(null);setSelStaff("any");setBookedBy("");
+  };
+  var chooseCity=function(c){
+    setCity(c);sto.set("jbs_city",c);setSelStaff("any");setClosedDays({});setAwayDays({});
     setSelSvc(null);setSelPkg(null);setSelDate(null);setSelTime(null);
   };
 
@@ -692,7 +792,7 @@ function App(){
   var Hdr=()=><div style={{textAlign:"center",paddingBottom:"1rem",marginBottom:"1rem",borderBottom:"0.5px solid "+C.bdr}}>
     <p style={{fontSize:22,fontWeight:600,margin:"0 0 2px",letterSpacing:"-0.3px",fontFamily:"Georgia,serif",color:C.accent}}>{sett.businessName}</p>
     <p style={{fontSize:13,color:C.t2,margin:0}}>{sett.tagline}</p>
-    <p style={{fontSize:9,color:C.t3,margin:"4px 0 0",letterSpacing:"0.05em"}}>v5.1 - JBS FINAL</p>
+    <p style={{fontSize:9,color:C.t3,margin:"4px 0 0",letterSpacing:"0.05em"}}>v6 - Sousse &amp; Tunis</p>
   </div>;
 
   var ZonePick=({ep})=>{
@@ -757,8 +857,19 @@ function App(){
     return<div style={S.pg}>
       <Toast/><LangBar/><Hdr/>
       <p style={S.h2}>{tr.bookTitle}</p>
-      <p style={Object.assign({},S.sb,{marginTop:"-0.5rem"})}>{tr.bookSub}</p>
-      {svcs.map(svc=>{
+      {!city&&<div style={S.cd}>
+        <p style={S.h3}>{tr.cityTitle}</p>
+        <p style={S.sb}>{tr.cityPick}</p>
+        <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10}}>
+          {CITY_NAMES.map(c=><button key={c} onClick={()=>chooseCity(c)} style={{padding:"1.1rem 0.5rem",borderRadius:10,border:"1.5px solid "+C.accent,background:C.aBg,color:C.aDk,fontSize:16,fontWeight:600,cursor:"pointer"}}>{(cityCfg(c)||{}).label||c}</button>)}
+        </div>
+      </div>}
+      {city&&<div style={{display:"flex",justifyContent:"space-between",alignItems:"center",gap:8,flexWrap:"wrap",background:C.aBg,borderRadius:10,padding:"0.6rem 0.9rem",marginBottom:"0.75rem"}}>
+        <span style={{fontSize:14,color:C.aDk}}>{tr.cityNow} <strong>{(cityCfg().label)||city}</strong></span>
+        <button onClick={()=>{setCity(null);sto.set("jbs_city","");}} style={{background:"transparent",border:"none",cursor:"pointer",fontSize:12,color:C.accent,textDecoration:"underline",padding:0}}>{tr.cityChange}</button>
+      </div>}
+      {city&&<p style={Object.assign({},S.sb,{marginTop:"-0.25rem"})}>{tr.bookSub}</p>}
+      {city&&cityServices().map(svc=>{
         var lsvc=svcL(svc),isJ=svc.id==="s6";
         var cStyle=isJ?Object.assign({},S.cd,{border:"1.5px solid "+C.accent,background:"linear-gradient(135deg,"+C.aBg+" 0%,#fff 60%)"}):S.cd;
         return<div key={svc.id} style={cStyle}>
@@ -776,7 +887,7 @@ function App(){
                 <span style={S.bg}><IcoClock size={10}/> {svc.dur} min</span>
                 {svc.price>0&&<span style={Object.assign({},S.bg,{background:C.wBg,color:C.warm})}>{svc.price} TND{svc.id==="s1"?" + home visit fee":""}</span>}
               </div>}
-              {lsvc.pkgs&&<div style={{display:"flex",gap:6,flexWrap:"wrap"}}>
+              {lsvc.pkgs&&!returningOnlyHere(svc.id)&&<div style={{display:"flex",gap:6,flexWrap:"wrap"}}>
                 {lsvc.pkgs.map(p=><span key={p.id} style={Object.assign({},S.bg,{background:isJ?C.goldBg:C.wBg,color:isJ?C.gold:C.warm})}>{p.label}: {p.price} TND</span>)}
               </div>}
             </div>
@@ -785,9 +896,10 @@ function App(){
             </button>}
           </div>
           {lsvc.pkgs&&(()=>{
-            var sc=SVC[svc.id]||{};
-            var isRC=!!sc.returningClient;
-            var rcOn=rcMap[svc.id]||false;
+            var sc=svcCfg(svc.id)||{};
+            var onlyRC=returningOnlyHere(svc.id);
+            var isRC=!!sc.returningClient&&!onlyRC;
+            var rcOn=onlyRC||rcMap[svc.id]||false;
             return<div style={{borderTop:"0.5px solid "+(isJ?C.accent:C.bdr),paddingTop:"0.85rem",marginTop:"0.75rem"}}>
               {/* Returning client toggle */}
               {isRC&&<div style={{marginBottom:"0.85rem"}}>
@@ -860,6 +972,12 @@ function App(){
         </div>
       </div>
       <p style={S.h2}>{tr.chooseDate}</p>
+      {cityTeam().length>1&&<div style={S.cd}>
+        <label style={S.lb}>{tr.staffLbl}</label>
+        <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
+          {["any"].concat(cityTeam()).map(n=><button key={n} onClick={()=>{setSelStaff(n);setSelTime(null);}} style={{padding:"8px 14px",borderRadius:20,cursor:"pointer",fontSize:13,border:"1.5px solid "+(selStaff===n?C.accent:C.bdr),background:selStaff===n?C.aBg:"transparent",color:selStaff===n?C.aDk:C.txt,fontWeight:selStaff===n?600:400}}>{n==="any"?tr.anyStaff:n}</button>)}
+        </div>
+      </div>}
       <div style={S.cd}>
         <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:"0.75rem"}}>
           <button style={Object.assign({},S.bt,{padding:"4px 8px"})} onClick={()=>setCalMo(new Date(yr,mo-1))}><IcoChL size={14}/></button>
@@ -871,8 +989,8 @@ function App(){
           {cells.map((day,i)=>{
             if(!day)return<div key={"e"+i}/>;
             var ds=yr+"-"+(mo+1<10?"0":"")+(mo+1)+"-"+(day<10?"0":"")+day;
-            var past=ds<TDY,shut=!!closedDays[ds],av=!past&&!shut&&dayOk(ds,selSvc),sel=ds===selDate;
-            return<div key={ds} title={shut?tr.closedDay:undefined} onClick={()=>av&&(setSelDate(ds),setSelTime(null),setServerBooked([]),setServerBusy([]),setDayClosed(false),setSlotsError(false),setSlotNotice(""),fetchServerBooked(ds))} style={{aspectRatio:"1",display:"flex",alignItems:"center",justifyContent:"center",borderRadius:8,fontSize:13,cursor:av?"pointer":"default",userSelect:"none",background:sel?C.accent:"transparent",color:sel?"#fff":av?C.txt:C.t3,border:av&&!sel?"0.5px solid "+C.bdr:"none",fontWeight:sel?500:400,textDecoration:shut&&!past?"line-through":"none"}}>{day}</div>;
+            var past=ds<TDY,shut=!!closedDays[ds]||(selStaff!=="any"?!!(awayDays[selStaff]&&awayDays[selStaff][ds]):(cityTeam().length>0&&cityTeam().every(function(n){return !!(awayDays[n]&&awayDays[n][ds]);}))),av=!past&&!shut&&dayOk(ds,selSvc),sel=ds===selDate;
+            return<div key={ds} title={shut?tr.closedDay:undefined} onClick={()=>av&&(setSelDate(ds),setSelTime(null),setServerBooked([]),setServerBusy([]),setCityBusy([]),setStaffBusyMap({}),setDayClosed(false),setSlotsError(false),setSlotNotice(""),fetchServerBooked(ds))} style={{aspectRatio:"1",display:"flex",alignItems:"center",justifyContent:"center",borderRadius:8,fontSize:13,cursor:av?"pointer":"default",userSelect:"none",background:sel?C.accent:"transparent",color:sel?"#fff":av?C.txt:C.t3,border:av&&!sel?"0.5px solid "+C.bdr:"none",fontWeight:sel?500:400,textDecoration:shut&&!past?"line-through":"none"}}>{day}</div>;
           })}
         </div>
       </div>
@@ -917,7 +1035,7 @@ function App(){
       <Toast/><LangBar/>
       <div style={{display:"flex",alignItems:"center",gap:"0.5rem",marginBottom:"1rem"}}>
         <button style={Object.assign({},S.bt,{padding:"4px 8px"})} onClick={()=>setView("dt")}><IcoArL size={16}/></button>
-        <p style={{margin:0,fontSize:13,color:C.t2}}>{lsvc3.name}{selPkg?"  "+selPkg.label:""}  {tr.fmtDate(selDate)}  {tr.fmtTime(selTime)}</p>
+        <p style={{margin:0,fontSize:13,color:C.t2}}>{lsvc3.name}{selPkg?"  "+selPkg.label:""}  {tr.fmtDate(selDate)}  {tr.fmtTime(selTime)}  {city?" - "+((cityCfg().label)||city):""}{selStaff!=="any"?" - "+selStaff:""}</p>
       </div>
       <p style={S.h2}>{tr.yourDetails}</p>
 
@@ -1003,6 +1121,7 @@ function App(){
           <p style={{margin:"0 0 4px",fontSize:14,fontWeight:500}}>{lsvc4.name}{selPkg?" - "+selPkg.label:""}</p>
           {pNm&&<p style={{margin:"0 0 4px",fontSize:13,color:C.t2}}> {pNm}</p>}
           <p style={{margin:"0 0 4px",fontSize:13,color:C.t2}}>{tr.fmtDate(selDate)}  {tr.fmtTime(selTime)}</p>
+          <p style={{margin:"0 0 4px",fontSize:13,color:C.t2}}>{(cityCfg().label)||city}{bookedBy?" - "+tr.withLbl+" "+bookedBy:""}</p>
           {selSvc&&selSvc.hasDelivery?form.delChoice==="pickup"?<p style={{margin:"0 0 4px",fontSize:13,color:C.t2}}>Office {tr.pickupL}</p>:<p style={{margin:"0 0 4px",fontSize:13,color:C.t2}}>Delivery {tr.delivL}{tf?"  +"+tf+" TND":""}</p>
           :selSvc&&selSvc.id==="s1"?<><p style={{margin:"0 0 4px",fontSize:13,color:C.t2}}>{form.location==="home"?"Home "+tr.locHome:"Office "+tr.locOffice}</p>{tf>0&&<p style={{margin:"0 0 4px",fontSize:13,color:C.t2}}> +{tf} TND</p>}</>:null}
           {selPkg&&selPkg.isReturning
@@ -1055,12 +1174,13 @@ function App(){
     var DAYS2=["Sunday","Monday","Tuesday","Wednesday","Thursday","Friday","Saturday"];
     var fmtAD=s=>{if(!s)return"";var p=s.split("-").map(Number);var D=["Sun","Mon","Tue","Wed","Thu","Fri","Sat"],M=["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];return D[new Date(p[0],p[1]-1,p[2]).getDay()]+" "+M[p[1]-1]+" "+p[2]+", "+p[0];};
     var fmtAT=t=>{if(!t)return"";var p=t.split(":").map(Number);return(p[0]%12||12)+":"+(p[1]<10?"0":"")+p[1]+" "+(p[0]>=12?"PM":"AM");};
-    var upcoming2=books.filter(b=>b.status==="confirmed"&&b.date>=today2).sort((a,b)=>(a.date+a.time).localeCompare(b.date+b.time));
-    var past2    =books.filter(b=>b.status!=="cancelled"&&b.date<today2).sort((a,b)=>(b.date+b.time).localeCompare(a.date+a.time));
-    var cancelled2=books.filter(b=>b.status==="cancelled");
-    var all2=[...books].sort((a,b)=>(b.createdAt||"").localeCompare(a.createdAt||""));
+    var cb=aCity==="all"?books:books.filter(b=>(b.city||"Sousse")===aCity);
+    var upcoming2=cb.filter(b=>b.status==="confirmed"&&b.date>=today2).sort((a,b)=>(a.date+a.time).localeCompare(b.date+b.time));
+    var past2    =cb.filter(b=>b.status!=="cancelled"&&b.date<today2).sort((a,b)=>(b.date+b.time).localeCompare(a.date+a.time));
+    var cancelled2=cb.filter(b=>b.status==="cancelled");
+    var all2=[...cb].sort((a,b)=>(b.createdAt||"").localeCompare(a.createdAt||""));
     var lm2={upcoming:upcoming2,past:past2,cancelled:cancelled2,all:all2};
-    var actPumps=books.filter(b=>b.status==="confirmed"&&b.pumpId);
+    var actPumps=cb.filter(b=>b.status==="confirmed"&&b.pumpId);
 
     var BCard=({b})=><div style={S.cd}>
       <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",gap:"0.5rem"}}>
@@ -1069,6 +1189,8 @@ function App(){
             <p style={{margin:0,fontSize:15,fontWeight:500}}>{b.clientName}</p>
             <span style={tg(b.status==="confirmed"?C.okBg:C.errBg,b.status==="confirmed"?C.ok:C.err)}>{b.status}</span>
             {b.lang&&<span style={{fontSize:10,padding:"2px 6px",borderRadius:10,background:C.aBg,color:C.aDk,fontWeight:600,textTransform:"uppercase"}}>{b.lang}</span>}
+            <span style={tg(C.wBg,C.warm)}>{b.city||"Sousse"}</span>
+            {b.staff&&<span style={tg(C.goldBg,C.gold)}>{b.staff}</span>}
             {b.id&&sto.get("jbs_synced_"+b.id)&&<span style={tg(C.okBg,C.ok)}>OK Synced</span>}
           </div>
           <p style={{margin:"0 0 2px",fontSize:13,color:C.t2}}>{b.serviceName}{b.packageLabel?" - "+b.packageLabel:""}</p>
@@ -1103,6 +1225,10 @@ function App(){
         <div><p style={{margin:"0 0 2px",fontSize:14,fontWeight:600,color:C.accent}}>{sett.businessName}</p><p style={{margin:0,fontSize:12,color:C.t2}}>Admin panel</p></div>
         <button style={Object.assign({},S.bt,{fontSize:12})} onClick={()=>setView("home")}><IcoOut size={13}/> Exit</button>
       </div>
+      <div style={{display:"flex",gap:6,marginBottom:"0.75rem",alignItems:"center",flexWrap:"wrap"}}>
+        <span style={{fontSize:12,color:C.t2}}>Show:</span>
+        {[["all","Both cities"],["Sousse","Sousse"],["Tunis","Tunis"]].map(x=><button key={x[0]} onClick={()=>setACity(x[0])} style={Object.assign({},S.bs,{background:aCity===x[0]?C.aBg:"transparent",color:aCity===x[0]?C.aDk:C.t2,border:"0.5px solid "+(aCity===x[0]?C.accent:C.bdr),fontWeight:aCity===x[0]?600:400})}>{x[1]}</button>)}
+      </div>
       <div style={{display:"flex",gap:4,marginBottom:"1.25rem",flexWrap:"wrap"}}>
         {tabs2.map(t=><button key={t.id} onClick={()=>setATab(t.id)} style={Object.assign({},S.bt,{fontSize:12,padding:"5px 10px",background:aTab===t.id?C.aBg:"transparent",color:aTab===t.id?C.aDk:C.t2,border:"0.5px solid "+(aTab===t.id?C.accent:C.bdr),fontWeight:aTab===t.id?500:400})}>{t.icon} {t.label}</button>)}
       </div>
@@ -1117,7 +1243,7 @@ function App(){
         </div>}
         {!booksLoading&&booksLoaded&&!booksRestricted&&<div style={{fontSize:11,color:C.ok,marginBottom:"0.75rem",display:"flex",alignItems:"center",gap:4}}>OK Live data from Google Sheets <button style={{fontSize:11,color:C.accent,background:"transparent",border:"none",cursor:"pointer",textDecoration:"underline",padding:0}} onClick={()=>fetchAllBookings(true,true)}>Refresh</button></div>}
         <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(130px,1fr))",gap:10,marginBottom:"1.25rem"}}>
-          {[{l:"Upcoming",v:upcoming2.length,bg:C.aBg,c:C.aDk},{l:"Past",v:past2.length,bg:C.okBg,c:C.ok},{l:"Cancelled",v:cancelled2.length,bg:C.errBg,c:C.err},{l:"Total",v:books.length,bg:C.inp,c:C.t2}].map(x=><div key={x.l} style={{background:x.bg,borderRadius:10,padding:"0.9rem",textAlign:"center"}}><p style={{margin:"0 0 4px",fontSize:12,color:x.c,opacity:0.7}}>{x.l}</p><p style={{margin:0,fontSize:26,fontWeight:600,color:x.c}}>{x.v}</p></div>)}
+          {[{l:"Upcoming",v:upcoming2.length,bg:C.aBg,c:C.aDk},{l:"Past",v:past2.length,bg:C.okBg,c:C.ok},{l:"Cancelled",v:cancelled2.length,bg:C.errBg,c:C.err},{l:"Total",v:cb.length,bg:C.inp,c:C.t2}].map(x=><div key={x.l} style={{background:x.bg,borderRadius:10,padding:"0.9rem",textAlign:"center"}}><p style={{margin:"0 0 4px",fontSize:12,color:x.c,opacity:0.7}}>{x.l}</p><p style={{margin:0,fontSize:26,fontWeight:600,color:x.c}}>{x.v}</p></div>)}
         </div>
         {sett.scriptUrl&&<div style={{background:C.okBg,border:"0.5px solid "+C.ok,borderRadius:8,padding:"0.75rem 1rem",marginBottom:"1rem",fontSize:13,color:C.ok}}> Google Sheets & Calendar integration is <strong>active</strong>. New bookings sync automatically.</div>}
         {!sett.scriptUrl&&<div style={{background:C.warnBg,border:"0.5px solid "+C.warn,borderRadius:8,padding:"0.75rem 1rem",marginBottom:"1rem",fontSize:13,color:C.warn}}>! Google Sheets & Calendar not connected yet. Go to <strong>Settings  Backend URL</strong> to connect.</div>}
@@ -1128,20 +1254,23 @@ function App(){
 
       {aTab==="pumps"&&<div>
         <p style={S.h2}>Pump inventory</p>
-        <p style={S.sb}>Live availability calculated from active bookings. Cancel a booking to free up a unit.</p>
-        <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(200px,1fr))",gap:10,marginBottom:"1.25rem"}}>
-          {(sett.pumpInventory||[]).map(pump=>{var av=pumpFree(pump),rented=pump.total-av;return<div key={pump.id} style={Object.assign({},S.cd,{margin:0})}>
-            <div style={{display:"flex",alignItems:"center",gap:10,marginBottom:10}}>
-              <div style={{width:36,height:36,borderRadius:8,background:C.aBg,display:"flex",alignItems:"center",justifyContent:"center"}}>{pump.icon==="battery"?<IcoBatt size={18} style={{color:C.aDk}}/>:<IcoPlug size={18} style={{color:C.aDk}}/>}</div>
-              <div><p style={{margin:0,fontSize:14,fontWeight:500}}>{pump.name}</p><p style={{margin:0,fontSize:11,color:C.t2}}>{pump.desc}</p></div>
-            </div>
-            <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:6,textAlign:"center"}}>
-              <div style={{background:C.inp,borderRadius:6,padding:"6px 4px"}}><p style={{margin:0,fontSize:18,fontWeight:600,color:C.txt}}>{pump.total}</p><p style={{margin:0,fontSize:10,color:C.t2}}>Total</p></div>
-              <div style={{background:C.errBg,borderRadius:6,padding:"6px 4px"}}><p style={{margin:0,fontSize:18,fontWeight:600,color:C.err}}>{rented}</p><p style={{margin:0,fontSize:10,color:C.err}}>Rented</p></div>
-              <div style={{background:C.okBg,borderRadius:6,padding:"6px 4px"}}><p style={{margin:0,fontSize:18,fontWeight:600,color:C.ok}}>{av}</p><p style={{margin:0,fontSize:10,color:C.ok}}>Free</p></div>
-            </div>
-          </div>;})}
-        </div>
+        <p style={S.sb}>Each city has its own pumps. Availability is worked out from active bookings; cancel a booking to free up a unit. Stock is set in the booking system (Sousse S1 1 + S2 2, Tunis S1 1 + S2 2).</p>
+        {(aCity==="all"?CITY_NAMES:[aCity]).map(cn=><div key={cn} style={{marginBottom:"1.25rem"}}>
+          <p style={Object.assign({},S.h3,{marginBottom:"0.6rem"})}>{cn}</p>
+          <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(200px,1fr))",gap:10}}>
+            {(sett.pumpInventory||[]).map(pump=>{var tot=pumpStock(pump,cn),av=pumpFree(pump,cn),rented=tot-av;return<div key={pump.id} style={Object.assign({},S.cd,{margin:0})}>
+              <div style={{display:"flex",alignItems:"center",gap:10,marginBottom:10}}>
+                <div style={{width:36,height:36,borderRadius:8,background:C.aBg,display:"flex",alignItems:"center",justifyContent:"center"}}>{pump.icon==="battery"?<IcoBatt size={18} style={{color:C.aDk}}/>:<IcoPlug size={18} style={{color:C.aDk}}/>}</div>
+                <div><p style={{margin:0,fontSize:14,fontWeight:500}}>{pump.name}</p><p style={{margin:0,fontSize:11,color:C.t2}}>{pump.desc}</p></div>
+              </div>
+              <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:6,textAlign:"center"}}>
+                <div style={{background:C.inp,borderRadius:6,padding:"6px 4px"}}><p style={{margin:0,fontSize:18,fontWeight:600,color:C.txt}}>{tot}</p><p style={{margin:0,fontSize:10,color:C.t2}}>Total</p></div>
+                <div style={{background:C.errBg,borderRadius:6,padding:"6px 4px"}}><p style={{margin:0,fontSize:18,fontWeight:600,color:C.err}}>{rented}</p><p style={{margin:0,fontSize:10,color:C.err}}>Rented</p></div>
+                <div style={{background:C.okBg,borderRadius:6,padding:"6px 4px"}}><p style={{margin:0,fontSize:18,fontWeight:600,color:C.ok}}>{av}</p><p style={{margin:0,fontSize:10,color:C.ok}}>Free</p></div>
+              </div>
+            </div>;})}
+          </div>
+        </div>)}
         <p style={Object.assign({},S.h3,{marginBottom:"0.75rem"})}>Active rentals</p>
         {actPumps.length===0?<p style={S.sb}>No pumps currently rented out.</p>:actPumps.map(b=><BCard key={b.id} b={b}/>)}
       </div>}
@@ -1157,27 +1286,13 @@ function App(){
       </div>}
 
       {aTab==="availability"&&<div>
-        <p style={S.h2}>Global availability</p>
-        <p style={S.sb}>Default schedule used by services without a custom one. Set per-service schedules in <strong>Services</strong>.</p>
-        {DAYS2.map((day,i)=>{
-          var da=(editAvl||avail)[i];
-          return<div key={i} style={Object.assign({},S.cd,{padding:"0.75rem 1rem"})}>
-            <div style={{display:"flex",alignItems:"center",gap:"0.75rem",flexWrap:"wrap"}}>
-              <div style={{display:"flex",alignItems:"center",gap:6,cursor:"pointer",minWidth:130}} onClick={()=>setEditAvl(Object.assign({},editAvl||avail,{[i]:Object.assign({},da,{enabled:!da.enabled})}))}>
-                <div style={{width:36,height:20,borderRadius:10,background:da.enabled?C.accent:C.bdr,position:"relative",flexShrink:0,transition:"background 0.2s"}}>
-                  <div style={{position:"absolute",top:2,left:da.enabled?18:2,width:16,height:16,borderRadius:"50%",background:"#fff",transition:"left 0.2s"}}/>
-                </div>
-                <span style={{fontSize:14,fontWeight:da.enabled?500:400,color:da.enabled?C.txt:C.t3}}>{day}</span>
-              </div>
-              {da.enabled&&da.times.map((t,ti)=><div key={ti} style={{display:"flex",alignItems:"center",gap:6,flex:1,flexWrap:"wrap"}}>
-                <input type="time" value={t.start} style={Object.assign({},S.ip,{width:"auto",flex:1,minWidth:90,padding:"5px 8px",fontSize:13})} onChange={e=>{var nt=da.times.map((x,xi)=>xi===ti?Object.assign({},x,{start:e.target.value}):x);setEditAvl(Object.assign({},editAvl||avail,{[i]:Object.assign({},da,{times:nt})}));}}/>
-                <span style={{fontSize:12,color:C.t2}}>-</span>
-                <input type="time" value={t.end} style={Object.assign({},S.ip,{width:"auto",flex:1,minWidth:90,padding:"5px 8px",fontSize:13})} onChange={e=>{var nt=da.times.map((x,xi)=>xi===ti?Object.assign({},x,{end:e.target.value}):x);setEditAvl(Object.assign({},editAvl||avail,{[i]:Object.assign({},da,{times:nt})}));}}/>
-              </div>)}
-            </div>
-          </div>;
-        })}
-        {editAvl&&<button style={S.bp} onClick={()=>{saveAvail(editAvl);setEditAvl(null);showToast("Availability saved!");}}><IcoSave size={13}/> Save availability</button>}
+        <p style={S.h2}>Opening hours &amp; team</p>
+        <p style={S.sb}>This is what customers can book, read live from the booking system. Individual days off, holidays and time away are set in the staff dashboard (Days Off, Staff Away) or as all-day entries on each city's Google Calendar.</p>
+        {CITY_NAMES.map(cn=>{var cc=cityCfg(cn);return<div key={cn} style={S.cd}>
+          <p style={S.h3}>{cc.label||cn}</p>
+          <p style={{margin:"0 0 6px",fontSize:13,color:C.t2}}>Team: {(cc.staff||[]).join(", ")||"-"}</p>
+          <p style={{margin:0,fontSize:13,color:C.t2}}>{[1,2,3,4,5,6,0].map(i=>{var h=(cc.hours||{})[i];return DAYS2[i].slice(0,3)+" "+(h&&h.enabled?h.start+"-"+h.end:"closed");}).join("  |  ")}</p>
+        </div>;})}
       </div>}
 
       {aTab==="services"&&<div>
@@ -1185,7 +1300,7 @@ function App(){
           <p style={Object.assign({},S.h2,{margin:0})}>Services</p>
           <button style={S.bp} onClick={()=>setSvcFrm({id:Date.now().toString(),name:"New Service",dur:60,price:0,hasDelivery:false,customAvail:null})}><IcoPlus size={13}/> Add</button>
         </div>
-        <p style={Object.assign({},S.sb,{marginBottom:"1rem"})}>Built-in services (s1-s6) show bilingual names automatically.</p>
+        <p style={Object.assign({},S.sb,{marginBottom:"1rem"})}>Built-in services (s1-s6) show bilingual names automatically. Prices and durations edited here only change this device; customers see the prices in the booking page itself.</p>
         {svcs.map(svc=>{var ea=svc.customAvail||avail;var actD=[0,1,2,3,4,5,6].filter(i=>ea[i]&&ea[i].enabled);return<div key={svc.id} style={S.cd}>
           <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",gap:"0.5rem"}}>
             <div style={{flex:1}}>
@@ -1275,27 +1390,7 @@ function App(){
         </div>
         <div style={S.cd}>
           <p style={Object.assign({},S.h3,{marginBottom:"0.5rem"})}> Pump inventory</p>
-          <p style={Object.assign({},S.sb,{marginBottom:"0.85rem"})}>Set names and total stock. Live availability is tracked automatically from bookings.</p>
-          {((editSt||sett).pumpInventory||[]).map(function(pump,pi){return<div key={pump.id} style={{background:C.inp,borderRadius:10,padding:"0.85rem",marginBottom:"0.75rem"}}>
-            <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8,marginBottom:8}}>
-              <div><label style={S.lb}>Name (EN)</label><input type="text" style={S.ip} value={pump.name} onChange={e=>{var c=editSt||sett;setEditSt(Object.assign({},c,{pumpInventory:c.pumpInventory.map((p,i)=>i===pi?Object.assign({},p,{name:e.target.value}):p)}));}}/></div>
-              <div><label style={S.lb}>Name (FR)</label><input type="text" style={S.ip} value={pump.nameFr||""} onChange={e=>{var c=editSt||sett;setEditSt(Object.assign({},c,{pumpInventory:c.pumpInventory.map((p,i)=>i===pi?Object.assign({},p,{nameFr:e.target.value}):p)}));}}/></div>
-            </div>
-            <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8,marginBottom:8}}>
-              <div><label style={S.lb}>Description (EN)</label><input type="text" style={S.ip} value={pump.desc||""} onChange={e=>{var c=editSt||sett;setEditSt(Object.assign({},c,{pumpInventory:c.pumpInventory.map((p,i)=>i===pi?Object.assign({},p,{desc:e.target.value}):p)}));}}/></div>
-              <div><label style={S.lb}>Description (FR)</label><input type="text" style={S.ip} value={pump.descFr||""} onChange={e=>{var c=editSt||sett;setEditSt(Object.assign({},c,{pumpInventory:c.pumpInventory.map((p,i)=>i===pi?Object.assign({},p,{descFr:e.target.value}):p)}));}}/></div>
-            </div>
-            <div style={{display:"grid",gridTemplateColumns:"1fr 1fr auto",gap:8,alignItems:"end"}}>
-              <div><label style={S.lb}>Total units</label><input type="number" min="0" style={S.ip} value={pump.total} onChange={e=>{var c=editSt||sett;setEditSt(Object.assign({},c,{pumpInventory:c.pumpInventory.map((p,i)=>i===pi?Object.assign({},p,{total:Number(e.target.value)}):p)}));}}/></div>
-              <div><label style={S.lb}>Icon</label>
-                <select style={S.ip} value={pump.icon||"battery"} onChange={e=>{var c=editSt||sett;setEditSt(Object.assign({},c,{pumpInventory:c.pumpInventory.map((p,i)=>i===pi?Object.assign({},p,{icon:e.target.value}):p)}));}}>
-                  <option value="battery"> Battery</option><option value="plug"> Plug-in</option>
-                </select>
-              </div>
-              <button style={S.bd} onClick={()=>{var c=editSt||sett;setEditSt(Object.assign({},c,{pumpInventory:c.pumpInventory.filter((_,i)=>i!==pi)}));}}><IcoX size={11}/></button>
-            </div>
-          </div>;})}
-          <button style={S.bs} onClick={()=>{var c=editSt||sett;setEditSt(Object.assign({},c,{pumpInventory:(c.pumpInventory||[]).concat([{id:Date.now().toString(),name:"New Pump",nameFr:"Nouveau tire-lait",desc:"",descFr:"",total:1,icon:"battery"}])}));}}><IcoPlus size={11}/> Add pump model</button>
+          <p style={S.sb}>Pump stock per city is kept in the booking system so every device agrees: Sousse S1 {pumpStock({id:"ps1"},"Sousse")} + S2 {pumpStock({id:"ps2"},"Sousse")}, Tunis S1 {pumpStock({id:"ps1"},"Tunis")} + S2 {pumpStock({id:"ps2"},"Tunis")}. See the Pumps tab for what is out.</p>
         </div>
         <div style={S.cd}>
           <p style={Object.assign({},S.h3,{marginBottom:"0.5rem"})}> Transport / delivery zones</p>

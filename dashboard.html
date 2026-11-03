@@ -4743,6 +4743,82 @@ function CreateProfileFromBooking({ appt, packages, currentStaff, pin, onCreated
   );
 }
 
+// Every team member's own time off. It makes them unavailable on the booking page, shows them as away on the on-call
+// schedule, and adds an all-day "<Name> off" entry to their city's calendar.
+function MyTimeOffView({ pin, name }) {
+  const todayStr = new Date().toISOString().split("T")[0];
+  const [data, setData] = useState(null);
+  const [err, setErr] = useState("");
+  const [from, setFrom] = useState(todayStr);
+  const [to, setTo] = useState("");
+  const [reason, setReason] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [msg, setMsg] = useState("");
+  const [notes, setNotes] = useState([]);
+  const load = () => {
+    setErr("");
+    apiCall({ action: "getMyTimeOff", pin }).then(res => {
+      if (res.success) setData(res); else setErr(res.error || "Couldn't load your time off.");
+    }).catch(() => setErr("Couldn't reach the server. Please try again."));
+  };
+  useEffect(() => { load(); }, []);
+  const range = (a, b) => a === b ? a : a + " → " + b;
+  const save = () => {
+    setBusy(true); setMsg(""); setNotes([]);
+    apiCall({ action: "addStaffAway", pin, staff: name, from, to: to || from, reason }).then(res => {
+      setBusy(false);
+      if (!res.success) { setMsg(res.error || "Could not save."); return; }
+      setMsg("Saved. You are marked away " + range(from, to || from) + ".");
+      const n = (res.conflicts || []).map(c => "You are " + c.role + " on call for " + c.name + " " + (c.from === c.to ? "on " + c.from : c.from + " → " + c.to) + ": arrange cover.");
+      (res.alreadyBooked || []).forEach(b => n.push("Already booked: " + b.date + " " + b.time + " · " + b.name + (b.phone ? " · " + b.phone : "") + (b.service ? " · " + b.service : "")));
+      setNotes(n); setReason(""); setTo(""); load();
+    }).catch(() => { setBusy(false); setMsg("Couldn't reach the server. Check the list before pressing again."); });
+  };
+  const remove = (id) => {
+    if (!window.confirm("Remove this time off?")) return;
+    apiCall({ action: "deleteStaffAway", pin, awayId: id }).then(res => { if (res.success) { setMsg("Removed."); setNotes([]); load(); } else setMsg(res.error || "Could not remove."); }).catch(() => setMsg("Couldn't reach the server."));
+  };
+  return (
+    <div>
+      <h1 className="page-title">My time off</h1>
+      <p className="page-sub">Add the days you are away. Customers can't book you on those days, you show as away on the on-call schedule, and an all-day “{name} off” entry appears on your city's Google Calendar{data && data.calendars ? " (" + data.calendars.join(" and ") + ")" : ""}.</p>
+      {err && <LoadError message={err} onRetry={load} />}
+      {!data && !err && <div className="loading">Loading...</div>}
+      {msg && <div role="status" style={{background: "var(--ok-bg)", color: "var(--ok)", borderRadius: 8, padding: "8px 12px", marginBottom: 12, fontSize: 13}}>{msg}</div>}
+      {notes.length > 0 && (
+        <div role="alert" style={{background: "#FFFBEB", border: "1px solid #F6E3A1", borderRadius: 8, padding: "10px 14px", marginBottom: 12, fontSize: 13, color: "#92400E"}}>
+          {notes.map((t, i) => <div key={i}>{t}</div>)}
+        </div>
+      )}
+      <div className="card">
+        <div className="component-label">Add time off</div>
+        <div className="payment-form-row">
+          <input className="form-input" type="date" min={todayStr} value={from} onChange={e => setFrom(e.target.value)} />
+          <input className="form-input" type="date" min={from || todayStr} value={to} onChange={e => setTo(e.target.value)} placeholder="Last day (optional)" />
+        </div>
+        <p style={{fontSize: 11, color: "var(--grey)", margin: "4px 0"}}>Leave “last day” empty for a single day.</p>
+        <input className="form-input" style={{marginTop: 6, width: "100%"}} placeholder="Reason (optional, only the owner sees it)" value={reason} onChange={e => setReason(e.target.value)} />
+        <button className="btn-confirm" style={{marginTop: 10}} disabled={busy || !from} onClick={save}>{busy ? "Saving..." : "Add time off"}</button>
+      </div>
+      {data && (
+        <div className="card">
+          <div className="component-label">Your coming time off</div>
+          {data.entries.length === 0 && <p style={{fontSize: 13, color: "var(--grey)"}}>Nothing booked off.</p>}
+          {data.entries.map(e => (
+            <div key={e.id} style={{display: "flex", justifyContent: "space-between", gap: 10, padding: "8px 0", borderTop: "1px solid var(--grey-light)"}}>
+              <div>
+                <div style={{fontSize: 13, fontWeight: 600}}>{range(e.from, e.to)}</div>
+                {e.reason && <div style={{fontSize: 12, color: "var(--grey)"}}>{e.reason}</div>}
+              </div>
+              <span style={{fontSize: 12, color: "var(--grey)", textDecoration: "underline", cursor: "pointer", whiteSpace: "nowrap"}} onClick={() => remove(e.id)}>remove</span>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
 // Owner screen: close days or hours on the public booking page.
 function DaysOffView({ pin }) {
   const todayStr = new Date().toISOString().split("T")[0];
@@ -4754,6 +4830,7 @@ function DaysOffView({ pin }) {
   const [ft, setFt] = useState("");
   const [tt, setTt] = useState("");
   const [reason, setReason] = useState("");
+  const [where, setWhere] = useState("");   // "" = both cities
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState("");
   const [booked, setBooked] = useState([]);
@@ -4768,10 +4845,10 @@ function DaysOffView({ pin }) {
 
   const save = () => {
     setBusy(true); setMsg(""); setBooked([]);
-    apiCall({ action: "addDayOff", pin, fromDate: from, toDate: to || from, fromTime: hours ? ft : "", toTime: hours ? tt : "", reason }).then(res => {
+    apiCall({ action: "addDayOff", pin, fromDate: from, toDate: to || from, fromTime: hours ? ft : "", toTime: hours ? tt : "", reason, city: where }).then(res => {
       setBusy(false);
       if (res.success) {
-        setMsg("Saved. The booking page now offers nothing " + (hours ? "in those hours." : "on those days."));
+        setMsg("Saved. The booking page now offers nothing" + (where ? " in " + where : "") + (hours ? " in those hours." : " on those days."));
         setBooked(res.alreadyBooked || []);
         setReason(""); setTo(""); setFt(""); setTt("");
         load();
@@ -4783,11 +4860,12 @@ function DaysOffView({ pin }) {
     apiCall({ action: "deleteDayOff", pin, blockId: id }).then(res => { if (res.success) { setMsg("Removed."); setBooked([]); load(); } else setMsg(res.error || "Could not remove."); }).catch(() => setMsg("Couldn't reach the server."));
   };
   const range = (a, b) => a === b ? a : a + " → " + b;
+  const scope = (b) => (b.person ? b.person + " only" : "everyone") + " · " + (b.city || "both cities");
 
   return (
     <div>
       <h2 className="hub-view-title">Days off</h2>
-      <p className="page-sub">Close days or hours on the public booking page. Nobody can book them, even with the page already open.</p>
+      <p className="page-sub">Close days or hours on the public booking page for both cities or one city (a holiday, a training day). Nobody can book them, even with the page already open. Each team member sets their own time off under My time off.</p>
       {err && <LoadError message={err} onRetry={load} />}
       {!data && !err && <div className="loading">Loading...</div>}
       {msg && <div role="status" style={{background: "var(--ok-bg)", color: "var(--ok)", borderRadius: 8, padding: "8px 12px", marginBottom: 12, fontSize: 13}}>{msg}</div>}
@@ -4814,6 +4892,12 @@ function DaysOffView({ pin }) {
             <input className="form-input" type="time" value={tt} onChange={e => setTt(e.target.value)} />
           </div>
         )}
+        <div className="payment-form-row" style={{marginTop: 6}}>
+          <select className="form-input" value={where} onChange={e => setWhere(e.target.value)} aria-label="Which city">
+            <option value="">Both cities</option><option value="Sousse">Sousse only</option><option value="Tunis">Tunis only</option>
+          </select>
+        </div>
+        <p style={{fontSize: 11, color: "var(--grey)", margin: "4px 0"}}>This closes the day for everyone in that city. A team member's own time off is set by them under <strong>My time off</strong>, and then only they stop being bookable.</p>
         <input className="form-input" style={{marginTop: 6, width: "100%"}} placeholder="Reason (only you see this)" value={reason} onChange={e => setReason(e.target.value)} />
         <button className="btn-confirm" style={{marginTop: 10}} disabled={busy || !from || (hours && !ft && !tt)} onClick={save}>{busy ? "Saving..." : "Close " + (hours ? "these hours" : (to && to !== from ? "these days" : "this day"))}</button>
       </div>
@@ -4826,6 +4910,7 @@ function DaysOffView({ pin }) {
             <div key={b.id} style={{display: "flex", justifyContent: "space-between", gap: 10, padding: "8px 0", borderTop: "1px solid var(--grey-light)"}}>
               <div>
                 <div style={{fontSize: 13, fontWeight: 600}}>{range(b.from, b.to)}{b.fromTime || b.toTime ? " · " + (b.fromTime || "00:00") + "–" + (b.toTime || "24:00") : " · whole day"}</div>
+                <div style={{fontSize: 12, color: "var(--grey)"}}>{scope(b)}</div>
                 {b.reason && <div style={{fontSize: 12, color: "var(--grey)"}}>{b.reason}</div>}
               </div>
               <span style={{fontSize: 12, color: "var(--grey)", textDecoration: "underline", cursor: "pointer", whiteSpace: "nowrap"}} onClick={() => remove(b.id)}>reopen</span>
@@ -4837,11 +4922,11 @@ function DaysOffView({ pin }) {
       {data && (
         <div className="card">
           <div className="component-label">Closed by your Google Calendar</div>
-          <p style={{fontSize: 12, color: "var(--grey)", margin: "2px 0 6px"}}>An <strong>all-day</strong> calendar entry closes that day when its title contains a word like <em>off, closed, holiday, vacation, away, Tunis, congé, fermé</em>. Other all-day entries (reminders) don't close anything. To reopen a day, change or delete the calendar entry.</p>
+          <p style={{fontSize: 12, color: "var(--grey)", margin: "2px 0 6px"}}>An <strong>all-day</strong> entry on a city's calendar closes that city when its title says <em>closed, holiday, congé, fermé</em>. If its title says <em>off, away, vacation, Tunis</em> it marks one person away (the person named in the title, otherwise the calendar's owner: Joy on the Sousse calendar). Other all-day entries (reminders) don't change anything. To reopen a day, change or delete the calendar entry.</p>
           {data.fromCalendar.length === 0 && <p style={{fontSize: 13, color: "var(--grey)"}}>No all-day entries are closing days right now.</p>}
           {data.fromCalendar.map((c, i) => (
             <div key={i} style={{padding: "6px 0", borderTop: "1px solid var(--grey-light)", fontSize: 13}}>
-              <strong>{range(c.from, c.to)}</strong> · “{c.title}”
+              <strong>{range(c.from, c.to)}</strong> · “{c.title}”{c.city ? <span style={{color: "var(--grey)"}}> · {c.city} calendar</span> : null}
             </div>
           ))}
         </div>
@@ -5718,6 +5803,9 @@ function Dashboard({ staff, pin, onLogout }) {
         <div className={"nav-item" + (view === "team" ? " active" : "")} onClick={() => setView("team")}>
           Team
         </div>
+        <div className={"nav-item" + (view === "mytimeoff" ? " active" : "")} onClick={() => setView("mytimeoff")}>
+          My time off
+        </div>
         {staff.role === "owner" && (
           <div className={"nav-item" + (view === "daysoff" ? " active" : "")} onClick={() => setView("daysoff")}>
             Days off
@@ -5758,6 +5846,7 @@ function Dashboard({ staff, pin, onLogout }) {
         {data && view === "messages" && <MessagesView pin={pin} />}
         {data && view === "oncall" && <OnCallView pin={pin} isOwner={staff.role === "owner"} />}
         {data && view === "team" && <TeamView pin={pin} />}
+        {data && view === "mytimeoff" && <MyTimeOffView pin={pin} name={staff.name} />}
         {data && view === "clients" && <ClientsView pin={pin} currentStaff={staff} autoOpen={clientsOpen} onAutoOpened={() => setClientsOpen(null)} unlinked={data.unlinked} />}
         {data && view === "invoice" && <InvoicesHub pin={pin} />}
         {data && view === "caisse" && <CaisseView pin={pin} staff={staff} />}
