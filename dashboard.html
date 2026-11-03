@@ -4743,6 +4743,108 @@ function CreateProfileFromBooking({ appt, packages, currentStaff, pin, onCreated
   );
 }
 
+// Owner screen: which service is offered on which days and at what times, per city (read live by the booking page).
+const SH_DAYS = [[1, "Monday"], [2, "Tuesday"], [3, "Wednesday"], [4, "Thursday"], [5, "Friday"], [6, "Saturday"], [0, "Sunday"]];
+const SH_SHORT = { 0: "Sun", 1: "Mon", 2: "Tue", 3: "Wed", 4: "Thu", 5: "Fri", 6: "Sat" };
+function summarizeWindows(windows) {
+  const parts = [];
+  SH_DAYS.forEach(([d]) => { const w = (windows || {})[d]; if (w && w.length) parts.push(SH_SHORT[d] + " " + w.map(x => x.start + "–" + x.end).join(", ")); });
+  return parts.join(" · ");
+}
+function ServiceHoursView({ pin }) {
+  const [data, setData] = useState(null);
+  const [err, setErr] = useState("");
+  const [cityIdx, setCityIdx] = useState(0);
+  const [editing, setEditing] = useState(null);   // service id being edited
+  const [draft, setDraft] = useState({});         // {day: [{start,end}]}
+  const [busy, setBusy] = useState(false);
+  const [msg, setMsg] = useState("");
+  const load = () => {
+    setErr("");
+    apiCall({ action: "getServiceHours", pin }).then(res => {
+      if (res.success) setData(res); else setErr(res.error || "Couldn't load the service hours.");
+    }).catch(() => setErr("Couldn't reach the server. Please try again."));
+  };
+  useEffect(() => { load(); }, []);
+  const city = data ? data.cities[cityIdx] : null;
+  const startEdit = (svc) => {
+    setMsg("");
+    const d = {};
+    if (svc.custom) Object.keys(svc.windows).forEach(k => { d[k] = svc.windows[k].map(w => ({ ...w })); });
+    else [1, 2, 3, 4, 5].forEach(k => { d[k] = [{ start: "09:00", end: "17:00" }]; });   // start from the usual week
+    setDraft(d); setEditing(svc.id);
+  };
+  const setWin = (day, i, field, value) => setDraft(prev => ({ ...prev, [day]: prev[day].map((w, j) => j === i ? { ...w, [field]: value } : w) }));
+  const toggleDay = (day) => setDraft(prev => { const n = { ...prev }; if (n[day] && n[day].length) delete n[day]; else n[day] = [{ start: "09:00", end: "17:00" }]; return n; });
+  const addWin = (day) => setDraft(prev => ({ ...prev, [day]: (prev[day] || []).concat([{ start: "14:00", end: "17:00" }]) }));
+  const delWin = (day, i) => setDraft(prev => { const n = { ...prev }; n[day] = n[day].filter((_, j) => j !== i); if (!n[day].length) delete n[day]; return n; });
+  const send = (svc, reset) => {
+    setBusy(true); setMsg("");
+    const body = { action: "saveServiceHours", pin, city: city.city, serviceId: svc.id };
+    if (reset) body.reset = "1"; else body.windows = JSON.stringify(draft);
+    apiCall(body).then(res => {
+      setBusy(false);
+      if (!res.success) { setMsg(res.error || "Could not save."); return; }
+      setMsg(reset ? svc.name + " in " + city.city + " follows the city hours again." : "Saved. " + svc.name + " in " + city.city + " is offered only at those times.");
+      setEditing(null); load();
+    }).catch(() => { setBusy(false); setMsg("Couldn't reach the server. Check the list before pressing again."); });
+  };
+  return (
+    <div>
+      <h2 className="hub-view-title">Service hours</h2>
+      <p className="page-sub">Choose which days and times each service can be booked on the public booking page. Without special hours a service follows the city's opening hours. Appointments already booked are not changed.</p>
+      {err && <LoadError message={err} onRetry={load} />}
+      {!data && !err && <div className="loading">Loading...</div>}
+      {msg && <div role="status" style={{background: "var(--ok-bg)", color: "var(--ok)", borderRadius: 8, padding: "8px 12px", marginBottom: 12, fontSize: 13}}>{msg}</div>}
+      {data && (
+        <div style={{display: "inline-flex", border: "1px solid var(--grey-light)", borderRadius: 8, overflow: "hidden", marginBottom: 12}}>
+          {data.cities.map((c, i) => <button key={c.city} onClick={() => { setCityIdx(i); setEditing(null); setMsg(""); }} style={{padding: "6px 16px", border: "none", cursor: "pointer", fontSize: 13, fontFamily: "inherit", background: i === cityIdx ? "var(--magenta)" : "transparent", color: i === cityIdx ? "#fff" : "var(--grey)"}}>{c.city}</button>)}
+        </div>
+      )}
+      {city && city.services.map(svc => (
+        <div className="card" key={svc.id}>
+          <div style={{display: "flex", justifyContent: "space-between", gap: 10, alignItems: "flex-start"}}>
+            <div>
+              <div style={{fontSize: 14, fontWeight: 600}}>{svc.name}</div>
+              <div style={{fontSize: 12, color: "var(--grey)", marginTop: 2}}>{svc.custom ? summarizeWindows(svc.windows) : "Follows the city hours (" + city.openText + ")"}</div>
+            </div>
+            {editing !== svc.id && <button className="btn-small" onClick={() => startEdit(svc)}>{svc.custom ? "Change" : "Set special hours"}</button>}
+          </div>
+          {editing === svc.id && (
+            <div style={{marginTop: 10, borderTop: "1px solid var(--grey-light)", paddingTop: 10}}>
+              {SH_DAYS.map(([d, label]) => (
+                <div key={d} style={{display: "flex", gap: 10, alignItems: "flex-start", padding: "5px 0"}}>
+                  <label style={{width: 110, display: "flex", alignItems: "center", gap: 6, fontSize: 13, cursor: "pointer", paddingTop: 6}}>
+                    <input type="checkbox" checked={!!(draft[d] && draft[d].length)} onChange={() => toggleDay(d)} /> {label}
+                  </label>
+                  <div style={{flex: 1}}>
+                    {(draft[d] || []).map((w, i) => (
+                      <div key={i} style={{display: "flex", gap: 6, alignItems: "center", marginBottom: 4}}>
+                        <input className="form-input" type="time" value={w.start} onChange={e => setWin(d, i, "start", e.target.value)} style={{width: 110}} />
+                        <span style={{fontSize: 12}}>to</span>
+                        <input className="form-input" type="time" value={w.end} onChange={e => setWin(d, i, "end", e.target.value)} style={{width: 110}} />
+                        <span style={{cursor: "pointer", color: "var(--grey)", fontSize: 16, padding: "0 6px"}} title="Remove these hours" onClick={() => delWin(d, i)}>×</span>
+                      </div>
+                    ))}
+                    {draft[d] && draft[d].length > 0 && draft[d].length < 3 && <span style={{fontSize: 12, color: "var(--grey)", textDecoration: "underline", cursor: "pointer"}} onClick={() => addWin(d)}>+ add more hours this day</span>}
+                    {!(draft[d] && draft[d].length) && <span style={{fontSize: 12, color: "var(--grey)", paddingTop: 6, display: "inline-block"}}>not offered</span>}
+                  </div>
+                </div>
+              ))}
+              <p style={{fontSize: 11, color: "var(--grey)", margin: "6px 0"}}>The service is offered only inside these windows, and never outside the city's own opening hours ({city.openText}). A class that lasts longer than a window can't be booked in it.</p>
+              <div style={{display: "flex", gap: 8, flexWrap: "wrap"}}>
+                <button className="btn-confirm" disabled={busy} onClick={() => send(svc, false)}>{busy ? "Saving..." : "Save these hours"}</button>
+                {svc.custom && <button className="btn-small" disabled={busy} onClick={() => send(svc, true)}>Use the city hours</button>}
+                <button className="btn-small" disabled={busy} onClick={() => setEditing(null)}>Cancel</button>
+              </div>
+            </div>
+          )}
+        </div>
+      ))}
+    </div>
+  );
+}
+
 // Every team member's own time off. It makes them unavailable on the booking page, shows them as away on the on-call
 // schedule, and adds an all-day "<Name> off" entry to their city's calendar.
 function MyTimeOffView({ pin, name }) {
@@ -5811,6 +5913,11 @@ function Dashboard({ staff, pin, onLogout }) {
             Days off
           </div>
         )}
+        {staff.role === "owner" && (
+          <div className={"nav-item" + (view === "servicehours" ? " active" : "")} onClick={() => setView("servicehours")}>
+            Service hours
+          </div>
+        )}
 
         <div className="nav-section">Clients</div>
         <div className={"nav-item" + (view === "clients" ? " active" : "")} onClick={() => setView("clients")}>
@@ -5843,6 +5950,7 @@ function Dashboard({ staff, pin, onLogout }) {
         {data && view === "calendar" && <CalendarView pin={pin} currentStaff={staff} />}
         {data && view === "groups" && <GroupClassesView pin={pin} currentStaff={staff} />}
         {data && view === "daysoff" && staff.role === "owner" && <DaysOffView pin={pin} />}
+        {data && view === "servicehours" && staff.role === "owner" && <ServiceHoursView pin={pin} />}
         {data && view === "messages" && <MessagesView pin={pin} />}
         {data && view === "oncall" && <OnCallView pin={pin} isOwner={staff.role === "owner"} />}
         {data && view === "team" && <TeamView pin={pin} />}

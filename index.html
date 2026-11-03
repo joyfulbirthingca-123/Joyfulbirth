@@ -481,7 +481,8 @@ function App(){
   const tr=TR[lang];
 
   var cityCfg=function(c){return (cfg.cities&&cfg.cities[c||city])||DEF_CFG.cities[c||city]||DEF_CFG.cities.Sousse;};
-  var svcCfg=function(id){return (city&&SVC_CITY[city]&&SVC_CITY[city][id])||SVC[id];};
+  var svcCfgFor=function(c,id){return (c&&SVC_CITY[c]&&SVC_CITY[c][id])||SVC[id];};
+  var svcCfg=function(id){return svcCfgFor(city,id);};
   var cityTeam=function(){
     if(!city)return [];
     var guests=cityCfg().guests||{};
@@ -490,7 +491,15 @@ function App(){
   };
   var returningOnlyHere=function(id){return (cityCfg().returningOnly||[]).indexOf(id)>=0;};
   var cityServices=function(){return city?svcs.filter(function(x){return (cityCfg().services||[]).indexOf(x.id)>=0;}):[];};
-  var hoursFor=function(ds){var p=ds.split("-").map(Number);var h=(cityCfg().hours||{})[new Date(p[0],p[1]-1,p[2]).getDay()];return h&&h.enabled?{enabled:true,times:[{start:h.start,end:h.end}]}:{enabled:false,times:[]};};
+  var hoursFor=function(ds,sid){
+    var p=ds.split("-").map(Number),day=new Date(p[0],p[1]-1,p[2]).getDay();
+    var h=(cityCfg().hours||{})[day];
+    if(!h||!h.enabled)return{enabled:false,times:[]};
+    var own=(((cfg.serviceHours||{})[city]||{})[sid]);          // the owner's windows for this service here (none = follow the city)
+    if(!own)return{enabled:true,times:[{start:h.start,end:h.end}]};
+    var times=(own[day]||[]).map(function(w){return{start:w.start<h.start?h.start:w.start,end:w.end>h.end?h.end:w.end};}).filter(function(w){return w.end>w.start;});
+    return{enabled:times.length>0,times:times};
+  };
   const svcL=svc=>{
     var c=svcCfg(svc.id);
     if(!c)return{name:svc.name||svc.id,desc:svc.desc||"",pkgs:null};
@@ -637,7 +646,7 @@ function App(){
   var yr=calMo.getFullYear(),mo=calMo.getMonth(),TDY=todayStr();
   var dIM=new Date(yr,mo+1,0).getDate(),fDay=new Date(yr,mo,1).getDay();
   var effAvl=svc=>svc&&svc.customAvail?svc.customAvail:avail;
-  var dayOk=(ds,svc)=>hoursFor(ds).enabled;
+  var dayOk=(ds,svc)=>hoursFor(ds,svc&&svc.id).enabled;
 
   // Fetch booked times for a date from the server (Google Sheet + Calendar)
   var fetchServerBooked=function(ds){
@@ -668,7 +677,7 @@ function App(){
   var getSlots=ds=>{
     if(!ds||!selSvc||dayClosed||slotsError)return[];
     var parts=ds.split("-").map(Number);
-    var da=hoursFor(ds);
+    var da=hoursFor(ds,selSvc.id);
     if(!da||!da.enabled)return[];
     // Use only server-side busy times (from the Sheet, the city's Calendar, days off and staff away)
     var allBooked=serverBooked;
@@ -1291,7 +1300,8 @@ function App(){
         {CITY_NAMES.map(cn=>{var cc=cityCfg(cn);return<div key={cn} style={S.cd}>
           <p style={S.h3}>{cc.label||cn}</p>
           <p style={{margin:"0 0 6px",fontSize:13,color:C.t2}}>Team: {(cc.staff||[]).join(", ")||"-"}</p>
-          <p style={{margin:0,fontSize:13,color:C.t2}}>{[1,2,3,4,5,6,0].map(i=>{var h=(cc.hours||{})[i];return DAYS2[i].slice(0,3)+" "+(h&&h.enabled?h.start+"-"+h.end:"closed");}).join("  |  ")}</p>
+<p style={{margin:0,fontSize:13,color:C.t2}}>{[1,2,3,4,5,6,0].map(i=>{var h=(cc.hours||{})[i];return DAYS2[i].slice(0,3)+" "+(h&&h.enabled?h.start+"-"+h.end:"closed");}).join("  |  ")}</p>
+          {(cc.services||[]).map(sid=>{var own=((cfg.serviceHours||{})[cn]||{})[sid];if(!own)return null;var nm=((svcCfgFor(cn,sid)||{}).en||{}).name||sid;return<p key={sid} style={{margin:"6px 0 0",fontSize:12,color:C.gold}}>{nm}: {[1,2,3,4,5,6,0].filter(i=>own[i]&&own[i].length).map(i=>DAYS2[i].slice(0,3)+" "+own[i].map(w=>w.start+"-"+w.end).join(", ")).join("  |  ")}</p>;})}
         </div>;})}
       </div>}
 
@@ -1300,7 +1310,7 @@ function App(){
           <p style={Object.assign({},S.h2,{margin:0})}>Services</p>
           <button style={S.bp} onClick={()=>setSvcFrm({id:Date.now().toString(),name:"New Service",dur:60,price:0,hasDelivery:false,customAvail:null})}><IcoPlus size={13}/> Add</button>
         </div>
-        <p style={Object.assign({},S.sb,{marginBottom:"1rem"})}>Built-in services (s1-s6) show bilingual names automatically. Prices and durations edited here only change this device; customers see the prices in the booking page itself.</p>
+        <p style={Object.assign({},S.sb,{marginBottom:"1rem"})}>Built-in services (s1-s6) show bilingual names automatically. Prices and durations edited here only change this device; customers see the prices in the booking page itself. Days and times per service are set in the staff dashboard (Service hours).</p>
         {svcs.map(svc=>{var ea=svc.customAvail||avail;var actD=[0,1,2,3,4,5,6].filter(i=>ea[i]&&ea[i].enabled);return<div key={svc.id} style={S.cd}>
           <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",gap:"0.5rem"}}>
             <div style={{flex:1}}>
@@ -1310,7 +1320,7 @@ function App(){
                 <span style={S.bg}><IcoClock size={10}/>{svc.dur} min</span>
                 {svc.price>0&&<span style={Object.assign({},S.bg,{background:C.wBg,color:C.warm})}>{svc.price} TND</span>}
                 {svc.hasDelivery&&<span style={Object.assign({},S.bg,{background:"#EEF2FF",color:"#3730A3"})}>Delivery Pickup/Delivery</span>}
-                {svc.customAvail?actD.length>0?actD.map(i=><span key={i} style={Object.assign({},S.bg,{background:"#FEF9EC",color:"#92600A"})}>{DAYS2[i].slice(0,3)}</span>):<span style={Object.assign({},S.bg,{background:C.errBg,color:C.err})}>No days set</span>:<span style={Object.assign({},S.bg,{background:C.inp,color:C.t2})}>Global schedule</span>}
+                {CITY_NAMES.map(cn=>{var own=((cfg.serviceHours||{})[cn]||{})[svc.id];return<span key={cn} style={Object.assign({},S.bg,{background:own?"#FEF9EC":C.inp,color:own?"#92600A":C.t2})}>{cn}: {own?"special hours":"city hours"}</span>;})}
               </div>
             </div>
             <div style={{display:"flex",gap:6}}>
@@ -1331,26 +1341,7 @@ function App(){
               </div>
               <p style={{margin:0,fontSize:13,color:svcFrm.hasDelivery?C.txt:C.t2}}>Pick-up / Delivery option</p>
             </div>
-            <div style={{borderTop:"0.5px solid "+C.bdr,paddingTop:"0.85rem"}}>
-              <label style={Object.assign({},S.lb,{marginBottom:10})}>Availability</label>
-              <div style={{display:"flex",alignItems:"center",gap:10,cursor:"pointer",marginBottom:"0.85rem"}} onClick={()=>setSvcFrm(Object.assign({},svcFrm,{customAvail:ea2?null:{0:{enabled:false,times:[{start:"09:00",end:"17:00"}]},1:{enabled:true,times:[{start:"09:00",end:"17:00"}]},2:{enabled:false,times:[{start:"09:00",end:"17:00"}]},3:{enabled:false,times:[{start:"09:00",end:"17:00"}]},4:{enabled:false,times:[{start:"09:00",end:"17:00"}]},5:{enabled:false,times:[{start:"09:00",end:"17:00"}]},6:{enabled:false,times:[{start:"09:00",end:"17:00"}]}}}))}>
-                <div style={{width:36,height:20,borderRadius:10,background:ea2?C.accent:C.bdr,position:"relative",flexShrink:0}}><div style={{position:"absolute",top:2,left:ea2?18:2,width:16,height:16,borderRadius:"50%",background:"#fff",transition:"left 0.2s"}}/></div>
-                <span style={{fontSize:13,color:ea2?C.txt:C.t2}}>{ea2?"Custom schedule":"Use global availability"}</span>
-              </div>
-              {ea2&&DAYS2.map((day,i)=>{var da=ea2[i];return<div key={i} style={{marginBottom:"0.6rem",padding:"0.6rem 0.75rem",background:C.inp,borderRadius:8}}>
-                <div style={{display:"flex",alignItems:"center",gap:"0.75rem",flexWrap:"wrap"}}>
-                  <div style={{display:"flex",alignItems:"center",gap:6,cursor:"pointer",minWidth:110}} onClick={()=>setSvcFrm(Object.assign({},svcFrm,{customAvail:Object.assign({},ea2,{[i]:Object.assign({},da,{enabled:!da.enabled})})}))}>
-                    <div style={{width:32,height:18,borderRadius:9,background:da.enabled?C.accent:C.bdr,position:"relative",flexShrink:0}}><div style={{position:"absolute",top:2,left:da.enabled?14:2,width:14,height:14,borderRadius:"50%",background:"#fff",transition:"left 0.2s"}}/></div>
-                    <span style={{fontSize:13,fontWeight:da.enabled?500:400,color:da.enabled?C.txt:C.t3}}>{day}</span>
-                  </div>
-                  {da.enabled&&da.times.map((t,ti)=><div key={ti} style={{display:"flex",alignItems:"center",gap:6,flex:1,flexWrap:"wrap"}}>
-                    <input type="time" value={t.start} style={Object.assign({},S.ip,{width:"auto",flex:1,minWidth:90,padding:"4px 8px",fontSize:13})} onChange={e=>{var nt=da.times.map((x,xi)=>xi===ti?Object.assign({},x,{start:e.target.value}):x);setSvcFrm(Object.assign({},svcFrm,{customAvail:Object.assign({},ea2,{[i]:Object.assign({},da,{times:nt})})}));}}/>
-                    <span style={{fontSize:12,color:C.t2}}>-</span>
-                    <input type="time" value={t.end} style={Object.assign({},S.ip,{width:"auto",flex:1,minWidth:90,padding:"4px 8px",fontSize:13})} onChange={e=>{var nt=da.times.map((x,xi)=>xi===ti?Object.assign({},x,{end:e.target.value}):x);setSvcFrm(Object.assign({},svcFrm,{customAvail:Object.assign({},ea2,{[i]:Object.assign({},da,{times:nt})})}));}}/>
-                  </div>)}
-                </div>
-              </div>;})}
-            </div>
+            <p style={Object.assign({},S.sb,{fontSize:12,borderTop:"0.5px solid "+C.bdr,paddingTop:"0.85rem"})}>Which days and times this service can be booked is set in the staff dashboard under <strong>Service hours</strong> (separately for Sousse and Tunis).</p>
             <div style={{display:"flex",gap:8,marginTop:"0.75rem"}}>
               <button style={S.bp} onClick={()=>{var ex=svcs.filter(s=>s.id===svcFrm.id)[0];saveSvcs(ex?svcs.map(s=>s.id===svcFrm.id?svcFrm:s):svcs.concat([svcFrm]));setSvcFrm(null);showToast("Saved!");}}><IcoSave size={13}/> Save</button>
               <button style={S.bt} onClick={()=>setSvcFrm(null)}><IcoX size={13}/> Cancel</button>
