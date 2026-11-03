@@ -1161,7 +1161,8 @@ function AddOnNote({ addOns }) {
   const tu = addOns.topUps || { count: 0, total: 0 };
   const un = addOns.uncovered || { clients: 0, total: 0 };
   const uc = addOns.uncertain || { count: 0, total: 0, items: [] };
-  if (addOns.count === 0 && ex.length === 0 && tu.count === 0 && un.clients === 0 && uc.count === 0) return null;
+  const cu = addOns.catchUp || { count: 0, total: 0, items: [] };
+  if (addOns.count === 0 && ex.length === 0 && tu.count === 0 && un.clients === 0 && uc.count === 0 && cu.count === 0) return null;
   return (
     <div style={{margin: "0 0 14px"}}>
       {addOns.count > 0 && (
@@ -1184,6 +1185,11 @@ function AddOnNote({ addOns }) {
           <strong>Left out until you check ({uc.total} TND):</strong> {uc.count} payment{uc.count !== 1 ? "s look" : " looks"} like money already counted through a booking made under a slightly different name. Connect them with Clients → Link bookings to clients and they are sorted out for good.
           {uc.items.map((x, i) => <div key={i}>{x.clientName}: {x.amount} TND on {x.date} · booking {x.bookingNote}</div>)}
         </div>
+      )}
+      {cu.count > 0 && (
+        <p style={{fontSize: 12, color: "var(--grey)", margin: "0 0 6px"}}>
+          Not counted as income: <strong>{cu.count}</strong> payment{cu.count !== 1 ? "s" : ""} ({cu.total} TND) entered afterwards for money received earlier ({cu.items.map(x => x.clientName + " " + x.amount + " TND").join("; ")}). They only settle balances for services already billed. If one was a service you never billed, add it as an appointment or add-on with its real date.
+        </p>
       )}
       {un.clients > 0 && (
         <div style={{background: "#F3F4F6", borderRadius: 8, padding: "8px 12px", fontSize: 12, color: "var(--grey)"}}>
