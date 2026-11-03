@@ -287,8 +287,10 @@ const DEF_SETT={
   scriptUrl:"",
   transportZones:[{id:"z1",label:"0 - 5 km",fee:10},{id:"z2",label:"5 - 15 km",fee:20},{id:"z3",label:"15 - 30 km",fee:35},{id:"z4",label:"30 km +",fee:50}],
   pumpInventory:[
-    {id:"ps1",name:"Spectra S1",nameFr:"Spectra S1",desc:"Battery powered - use anywhere",descFr:"Sur batterie - utilisable partout",total:2,icon:"battery"},
-    {id:"ps2",name:"Spectra S2",nameFr:"Spectra S2",desc:"Plug-in required",            descFr:"Branchement électrique requis",     total:3,icon:"plug"},
+    // "total" = the pumps that live in SOUSSE (this page books Sousse only for now). Stock per city (Oct 2026):
+    // Sousse S1 1, S2 2 | Tunis S1 1, S2 2. When Tunis opens, the page should count stock[city] instead.
+    {id:"ps1",name:"Spectra S1",nameFr:"Spectra S1",desc:"Battery powered - use anywhere",descFr:"Sur batterie - utilisable partout",total:1,stock:{Sousse:1,Tunis:1},icon:"battery"},
+    {id:"ps2",name:"Spectra S2",nameFr:"Spectra S2",desc:"Plug-in required",            descFr:"Branchement électrique requis",     total:2,stock:{Sousse:2,Tunis:2},icon:"plug"},
   ],
 };
 
