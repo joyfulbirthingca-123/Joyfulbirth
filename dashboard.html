@@ -1940,15 +1940,20 @@ function PaymentPlan({ client, pin, onUpdated }) {
 }
 
 function PaymentLedger({ client, pin, onUpdated, packages }) {
-  const todayStr = () => new Date().toISOString().split("T")[0];
-  const [payDate, setPayDate] = useState(new Date().toISOString().split("T")[0]);
-  const [svcDate, setSvcDate] = useState(new Date().toISOString().split("T")[0]);
+  // the day in Tunisia's own clock (toISOString would be UTC, and give the wrong day just after midnight)
+  const localDay = (offset) => { const d = new Date(); d.setDate(d.getDate() + (offset || 0)); return d.getFullYear() + "-" + String(d.getMonth() + 1).padStart(2, "0") + "-" + String(d.getDate()).padStart(2, "0"); };
+  const todayStr = () => localDay(0);
+  const [payDate, setPayDate] = useState(localDay(0));
+  const [svcDate, setSvcDate] = useState(localDay(0));
   const [editDate, setEditDate] = useState("");
   const [ledger, setLedger] = useState(null);
   const [amount, setAmount] = useState("");
   const [method, setMethod] = useState("");
   const [svcDesc, setSvcDesc] = useState("");
   const [svcAmount, setSvcAmount] = useState("");
+  const [svcTime, setSvcTime] = useState("");
+  const [svcPkg, setSvcPkg] = useState("");
+  const [svcMsg, setSvcMsg] = useState("");
   const [busy, setBusy] = useState(false);
   const [editId, setEditId] = useState(null); // id of the payment/charge being edited
   const [editA, setEditA] = useState("");
@@ -1974,12 +1979,28 @@ function PaymentLedger({ client, pin, onUpdated, packages }) {
     });
   };
 
+  const dayStr = localDay;
   const addService = () => {
-    if (!svcDesc || !svcAmount) return;
-    setBusy(true);
-    apiCall({ action: "addCharge", pin, clientId: client.id, description: svcDesc, amount: svcAmount, date: svcDate || todayStr() }).then(() => {
-      setSvcDesc(""); setSvcAmount(""); setSvcDate(todayStr()); setBusy(false); refresh();
-    });
+    if (!svcDesc || !svcAmount) { setSvcMsg("Choose the service and enter its price."); return; }
+    setBusy(true); setSvcMsg("");
+    apiCall({ action: "addClientService", pin, clientId: client.id, description: svcDesc, amount: svcAmount, date: svcDate || todayStr(), time: svcTime, packageId: svcPkg }).then(res => {
+      setBusy(false);
+      if (!res.success) { setSvcMsg(res.error || "Could not add the service."); return; }
+      const when = svcDate || todayStr();
+      setSvcMsg(res.appointmentSkipped
+        ? "Added to " + client.name + "'s account and invoice for " + when + ". No new appointment was made: " + res.appointmentSkipped + "."
+        : "Added for " + when + ". It is now on the Calendar, in " + client.name + "'s account and invoice, and in the weekly invoice list.");
+      setSvcDesc(""); setSvcAmount(""); setSvcTime(""); setSvcPkg(""); setSvcDate(todayStr()); refresh();
+    }).catch(() => { setBusy(false); setSvcMsg("Couldn't reach the server. Check the list above before pressing again, so it isn't added twice."); });
+  };
+  const putOnCalendar = (c) => {
+    if (!window.confirm("Put \"" + c.description + "\" on the Calendar on " + (c.date || "its date") + "? (Change the date first with 'edit' if it is wrong.)")) return;
+    setBusy(true); setSvcMsg("");
+    apiCall({ action: "linkChargeToAppointment", pin, chargeId: c.id }).then(res => {
+      setBusy(false);
+      setSvcMsg(res.success ? "Done: it is now on the Calendar." : (res.error || "Could not put it on the calendar."));
+      refresh();
+    }).catch(() => { setBusy(false); setSvcMsg("Couldn't reach the server."); });
   };
 
   const startEditPayment = (p) => { setEditId(p.id); setEditA(String(p.amount)); setEditB(p.method || ""); setEditDate(p.date || ""); };
@@ -1994,7 +2015,7 @@ function PaymentLedger({ client, pin, onUpdated, packages }) {
   };
   const saveEditCharge = (id) => {
     setBusy(true);
-    apiCall({ action: "updateCharge", pin, chargeId: id, amount: editA, description: editB }).then(() => {
+    apiCall({ action: "updateCharge", pin, chargeId: id, amount: editA, description: editB, date: editDate }).then(() => {
       setBusy(false); cancelEdit(); refresh();
     });
   };
@@ -2029,14 +2050,16 @@ function PaymentLedger({ client, pin, onUpdated, packages }) {
               <div className="payment-form-row" key={c.id} style={{marginBottom: 6}}>
                 <input className="form-input" value={editB} onChange={e => setEditB(e.target.value)} placeholder="Description" />
                 <input className="form-input" type="number" value={editA} onChange={e => setEditA(e.target.value)} placeholder="TND" style={{maxWidth: 90}} />
+                <input className="form-input" type="date" value={editDate} onChange={e => setEditDate(e.target.value)} title="Date of service" />
                 <button className="btn-small" onClick={() => saveEditCharge(c.id)} disabled={busy}>Save</button>
                 <button className="btn-remove-row" onClick={cancelEdit}>×</button>
               </div>
             ) : (
               <div className="ledger-row" key={c.id}>
-                <span>{c.date ? c.date + " · " : ""}{c.description}</span>
+                <span>{c.date ? c.date + " · " : ""}{c.description}{c.onCalendar && <span style={{fontSize: 11, color: "var(--ok)", marginLeft: 6}}>✓ on calendar</span>}</span>
                 <span style={{display: "flex", alignItems: "center", gap: 8}}>
                   +{c.amount} TND
+                  {!c.onCalendar && <span style={{fontSize: 11, color: "var(--magenta-dark)", cursor: "pointer", textDecoration: "underline"}} onClick={() => putOnCalendar(c)}>put on calendar</span>}
                   <span style={{fontSize: 11, color: "var(--magenta-dark)", cursor: "pointer", textDecoration: "underline"}} onClick={() => startEditCharge(c)}>edit</span>
                   <span style={{fontSize: 11, color: "#C0392B", cursor: "pointer"}} onClick={() => removeCharge(c.id)}>delete</span>
                 </span>
@@ -2085,7 +2108,7 @@ function PaymentLedger({ client, pin, onUpdated, packages }) {
           value=""
           onChange={e => {
             const p = (packages || []).find(x => x.id === e.target.value);
-            if (p) { setSvcDesc(p.name); setSvcAmount(String(p.price)); }
+            if (p) { setSvcDesc(p.name); setSvcAmount(String(p.price)); setSvcPkg(p.id); }
           }}
         >
           <option value="">+ Add one of your services...</option>
@@ -2093,12 +2116,21 @@ function PaymentLedger({ client, pin, onUpdated, packages }) {
         </select>
       </div>
 
-      <div className="payment-form-row" style={{marginTop: 6}}>
-        <input className="form-input" placeholder="Add-on service (e.g. extra session)" value={svcDesc} onChange={e => setSvcDesc(e.target.value)} />
+      <div style={{fontSize: 12, fontWeight: 600, color: "var(--magenta-dark)", margin: "10px 0 2px"}}>Add another service for {client.name}</div>
+      <p style={{fontSize: 11, color: "var(--grey)", margin: "0 0 4px"}}>It goes on the Calendar, the client's account and invoice, and the weekly invoice list, on the date it <strong>happened</strong>.</p>
+      <div className="payment-form-row" style={{marginTop: 4}}>
+        <input className="form-input" placeholder="Service (e.g. Breastfeeding consultation)" value={svcDesc} onChange={e => setSvcDesc(e.target.value)} />
         <input className="form-input" type="number" placeholder="Price TND" value={svcAmount} onChange={e => setSvcAmount(e.target.value)} />
-        <input className="form-input" type="date" value={svcDate} onChange={e => setSvcDate(e.target.value)} title="Date of service" />
-        <button className="btn-small" onClick={addService} disabled={busy}>Add service</button>
       </div>
+      <div className="payment-form-row" style={{marginTop: 6, alignItems: "center"}}>
+        <span style={{fontSize: 12, color: "var(--grey)"}}>When did it happen?</span>
+        <input className="form-input" type="date" value={svcDate} onChange={e => setSvcDate(e.target.value)} title="Date of service" />
+        <button className="btn-small" style={{background: "var(--grey-light)", color: "var(--grey)"}} onClick={() => setSvcDate(dayStr(0))}>Today</button>
+        <button className="btn-small" style={{background: "var(--grey-light)", color: "var(--grey)"}} onClick={() => setSvcDate(dayStr(-1))}>Yesterday</button>
+        <input className="form-input" type="time" value={svcTime} onChange={e => setSvcTime(e.target.value)} title="Time (optional)" style={{maxWidth: 120}} />
+      </div>
+      <button className="btn-confirm" style={{marginTop: 8}} onClick={addService} disabled={busy}>{busy ? "Adding..." : "Add service"}</button>
+      {svcMsg && <p role="status" style={{fontSize: 12, color: /^(Added|Done)/.test(svcMsg) ? "var(--ok)" : "var(--magenta-dark)", margin: "6px 0 0"}}>{svcMsg}</p>}
     </div>
   );
 }
@@ -3686,7 +3718,7 @@ function WeeklySummaryView({ pin }) {
         setSummary(res);
         // Default: pre-check only the items that actually have a charge
         const initial = {};
-        res.lineItems.forEach(li => { if (li.hasCharge) initial[li.id] = true; });
+        res.lineItems.forEach(li => { if (li.hasCharge && !li.onClientInvoice) initial[li.id] = true; });
         setSelected(initial);
       }
       setLoading(false);
@@ -3842,7 +3874,7 @@ function WeeklySummaryView({ pin }) {
             <div className="divers-row" key={li.id} style={{alignItems: "center", opacity: (li.hasCharge || (priceEdit && priceEdit.id === li.id)) ? 1 : 0.55}}>
               <label style={{display: "flex", alignItems: "center", gap: 8, cursor: "pointer", flex: 1}}>
                 <input type="checkbox" checked={!!selected[li.id]} onChange={() => toggle(li.id)} />
-                <span>{li.date} — {li.clientName} — {li.service}{li.packageLabel ? " (" + li.packageLabel + ")" : ""}</span>
+                <span>{li.date} — {li.clientName} — {li.service}{li.packageLabel ? " (" + li.packageLabel + ")" : ""}{li.onClientInvoice && <span style={{fontSize: 11, color: "var(--grey)", marginLeft: 6}}>· already on {li.clientName}'s own invoice (not ticked)</span>}</span>
               </label>
               <span style={{whiteSpace: "nowrap"}}>
                 {li.hasCharge ? li.base + " TND" : (priceEdit && priceEdit.id === li.id) ? (
