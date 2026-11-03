@@ -1374,7 +1374,7 @@ function OnCallView({ pin }) {
   return (
     <div>
       <h1 className="page-title">On call</h1>
-      <p className="page-sub">Clients between {data ? data.window.from : 37} and {data ? data.window.to : 42} weeks of pregnancy, counted from the due date on their profile. Doula (Joyful Birth Method) clients are included automatically.</p>
+      <p className="page-sub">Clients between {data ? data.window.from : 37} and {data ? data.window.to : 42} weeks of pregnancy, counted from the due date on their profile. Clients on a birth package (the Joyful Birth Method and the three JBS Tunis packages) are included automatically.</p>
 
       {err && <LoadError message={err} onRetry={load} />}
       {!data && !err && <div className="loading">Loading...</div>}
