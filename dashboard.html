@@ -5963,7 +5963,7 @@ function Dashboard({ staff, pin, onLogout }) {
         {data && view === "mytimeoff" && <MyTimeOffView pin={pin} name={staff.name} />}
         {data && view === "clients" && <ClientsView pin={pin} currentStaff={staff} autoOpen={clientsOpen} onAutoOpened={() => setClientsOpen(null)} unlinked={data.unlinked} />}
         {data && view === "invoice" && <InvoicesHub pin={pin} />}
-        {data && view === "caisse" && <CaisseView pin={pin} staff={staff} />}
+        {data && view === "caisse" && <CaisseHub pin={pin} staff={staff} />}
         {data && view === "reports" && staff.role === "owner" && <ReportsHub pin={pin} />}
       </div>
     </div>
@@ -5972,6 +5972,361 @@ function Dashboard({ staff, pin, onLogout }) {
 
 
 // The cash book: how much cash should be in the drawer, per city.
+const fmtTnd = (n) => (Math.round((Number(n) || 0) * 1000) / 1000).toLocaleString("en-US", { minimumFractionDigits: 0, maximumFractionDigits: 3 });
+const MONTH_NAMES = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
+function shiftYm(ym, dir) { const d = new Date(ym.y, ym.m - 1 + dir, 1); return { y: d.getFullYear(), m: d.getMonth() + 1 }; }
+function TabBar({ tabs, value, onChange }) {
+  return (
+    <div style={{display: "flex", border: "1.5px solid var(--grey-light)", borderRadius: 8, overflow: "hidden", width: "fit-content", marginBottom: 14, flexWrap: "wrap"}}>
+      {tabs.map(([k, label]) => (
+        <button key={k} onClick={() => onChange(k)} style={{padding: "8px 16px", border: "none", cursor: "pointer", fontSize: 13, fontFamily: "inherit", background: value === k ? "var(--magenta)" : "transparent", color: value === k ? "#fff" : "var(--grey)"}}>{label}</button>
+      ))}
+    </div>
+  );
+}
+function MonthNav({ ym, onChange, label }) {
+  return (
+    <div className="week-picker" style={{gap: 10, flexWrap: "wrap", marginBottom: 12}}>
+      <button className="btn-small" onClick={() => onChange(shiftYm(ym, -1))}>← Prev</button>
+      <span style={{fontSize: 14, fontWeight: 600, color: "var(--magenta-dark)"}}>{label || MONTH_NAMES[ym.m - 1] + " " + ym.y}</span>
+      <button className="btn-small" onClick={() => onChange(shiftYm(ym, 1))}>Next →</button>
+    </div>
+  );
+}
+function Line({ label, value, bold, small, minus }) {
+  return <div className="ledger-row" style={{fontWeight: bold ? 600 : 400, fontSize: small ? 12 : undefined, color: small ? "var(--grey)" : undefined}}><span>{label}</span><span>{minus ? "− " : ""}{value}</span></div>;
+}
+
+function CaisseHub({ pin, staff }) {
+  const isOwner = staff.role === "owner";
+  const [tab, setTab] = useState("drawer");
+  const tabs = [["drawer", "Drawer"], ["book", "Monthly cash book"]].concat(isOwner ? [["bank", "Bank"]] : []);
+  return (
+    <div>
+      <TabBar tabs={tabs} value={tab} onChange={setTab} />
+      {tab === "drawer" && <CaisseView pin={pin} staff={staff} />}
+      {tab === "book" && <CashBookView pin={pin} staff={staff} />}
+      {tab === "bank" && isOwner && <BankView pin={pin} />}
+    </div>
+  );
+}
+
+// A month of cash for one city, laid out for the accountant: opening, cash in, cash out (with TVA), closing, counts.
+function CashBookView({ pin, staff }) {
+  const cities = (staff.role === "owner" || staff.location === "All") ? ["Sousse", "Tunis"] : [staff.location === "Tunis" ? "Tunis" : "Sousse"];
+  const now = new Date();
+  const [city, setCity] = useState(cities[0]);
+  const [ym, setYm] = useState({ y: now.getFullYear(), m: now.getMonth() + 1 });
+  const [data, setData] = useState(null);
+  const [err, setErr] = useState("");
+  const load = () => {
+    setErr(""); setData(null);
+    apiCall({ action: "getCashBook", pin, city, year: ym.y, month: ym.m }).then(res => {
+      if (res.success) setData(res); else setErr(res.error || "Couldn't load the cash book.");
+    }).catch(() => setErr("Couldn't reach the server. Please try again."));
+  };
+  useEffect(() => { load(); }, [city, ym.y, ym.m]);
+
+  const printIt = () => {
+    if (!data) return;
+    const f = fmtTnd, e = escapeHtml;
+    let body = "<h1>Cash book — " + e(data.city) + " — " + e(data.label) + "</h1>";
+    body += "<h2>Summary</h2><div class='section'>";
+    if (data.state !== "before") {
+      body += '<div class="row"><span class="label">Opening balance' + (data.state === "starts" ? " (cash counted " + e(data.startDate) + ")" : "") + "</span><span>" + f(data.openingBalance) + " TND</span></div>";
+    } else {
+      body += '<div class="row"><span class="label">The ' + e(data.city) + ' caisse had not started yet</span><span>no balance</span></div>';
+    }
+    body += '<div class="row"><span class="label">Cash in</span><span>+ ' + f(data.in.total) + " TND</span></div>";
+    body += '<div class="row"><span class="label">Cash out</span><span>− ' + f(data.out.total) + " TND</span></div>";
+    if (data.state !== "before") body += '<div class="row"><span class="label"><b>Closing balance</b></span><span><b>' + f(data.closingBalance) + " TND</b></span></div>";
+    if (data.beforeOpening.in > 0 || data.beforeOpening.out > 0) body += '<div class="row"><span class="label">Of which before the opening count (not in the balance)</span><span>in ' + f(data.beforeOpening.in) + " / out " + f(data.beforeOpening.out) + " TND</span></div>";
+    body += "</div>";
+    body += "<h2>Cash in</h2><table><thead><tr><th>Type</th><th>Count</th><th>Amount</th></tr></thead><tbody>";
+    body += "<tr><td>Client payments</td><td>" + data.in.payments.count + "</td><td>" + f(data.in.payments.total) + " TND</td></tr>";
+    data.in.other.forEach(o => { body += "<tr><td>" + e(o.category) + "</td><td>" + o.count + "</td><td>" + f(o.amount) + " TND</td></tr>"; });
+    body += "</tbody></table>";
+    body += "<h2>Cash out</h2><table><thead><tr><th>Category</th><th>Count</th><th>HT</th><th>TVA</th><th>TTC</th></tr></thead><tbody>";
+    data.out.expenses.byCategory.forEach(o => { body += "<tr><td>" + e(o.category) + "</td><td>" + o.count + "</td><td>" + f(o.ht) + "</td><td>" + f(o.tva) + "</td><td>" + f(o.amount) + " TND</td></tr>"; });
+    data.out.other.forEach(o => { body += "<tr><td>" + e(o.category) + "</td><td>" + o.count + "</td><td></td><td></td><td>" + f(o.amount) + " TND</td></tr>"; });
+    body += "<tr><td><b>Total</b></td><td></td><td>" + f(data.out.expenses.ht) + "</td><td>" + f(data.out.expenses.tva) + "</td><td><b>" + f(data.out.total) + " TND</b></td></tr></tbody></table>";
+    if (data.counts.length) {
+      body += "<h2>Cash counts</h2><table><thead><tr><th>Date</th><th>Expected</th><th>Counted</th><th>Difference</th></tr></thead><tbody>";
+      data.counts.forEach(c => { body += "<tr><td>" + e(c.date) + "</td><td>" + f(c.expected) + "</td><td>" + f(c.counted) + "</td><td>" + (c.difference > 0 ? "+" : "") + f(c.difference) + "</td></tr>"; });
+      body += "</tbody></table>";
+    }
+    body += "<h2>All movements</h2><table><thead><tr><th>Date</th><th>Description</th><th>In</th><th>Out</th><th>Balance</th></tr></thead><tbody>";
+    data.movements.forEach(m => {
+      body += "<tr><td>" + e(m.date) + "</td><td>" + e(m.description || m.category) + (m.counted ? "" : " <span class='tag'>before opening</span>") + "</td><td>" + (m.dir === "in" ? f(m.amount) : "") + "</td><td>" + (m.dir === "out" ? f(m.amount) : "") + "</td><td>" + (m.balance === null ? "" : f(m.balance)) + "</td></tr>";
+    });
+    body += "</tbody></table>";
+    if (data.unclassifiedExpenses > 0) body += "<p>" + data.unclassifiedExpenses + " expense(s) in this month have no payment method and are not included.</p>";
+    printDocument("Cash book — " + data.city + " — " + data.label, body);
+  };
+
+  return (
+    <div>
+      <h2 className="hub-view-title">Monthly cash book</h2>
+      <p className="page-sub">The cash of one city for one month, ready for your accountant. It is built from the payments, expenses and caisse lines already recorded.</p>
+      {cities.length > 1 && <TabBar tabs={cities.map(c => [c, c])} value={city} onChange={setCity} />}
+      <MonthNav ym={ym} onChange={setYm} />
+      {err && <LoadError message={err} onRetry={load} />}
+      {!data && !err && <div className="loading">Loading...</div>}
+      {data && (
+        <React.Fragment>
+          <div className="card">
+            <div className="component-label">{data.city} · {data.label}</div>
+            {data.state === "before" ? (
+              <p style={{fontSize: 13, color: "var(--grey)", margin: "4px 0 8px"}}>{data.started ? "The " + data.city + " caisse starts on " + data.startDate + ", after this month, so there is no balance yet. The cash that moved is still listed below for the accounts." : "The " + data.city + " caisse hasn't been started, so there is no balance. The cash that moved is still listed below for the accounts."}</p>
+            ) : (
+              <Line label={"Opening balance" + (data.state === "starts" ? " (counted " + data.startDate + ")" : "")} value={fmtTnd(data.openingBalance) + " TND"} />
+            )}
+            <Line label="Cash in" value={"+ " + fmtTnd(data.in.total) + " TND"} />
+            <Line label="Cash out" value={"− " + fmtTnd(data.out.total) + " TND"} />
+            {data.state !== "before" && <Line label="Closing balance" value={fmtTnd(data.closingBalance) + " TND"} bold />}
+            {data.beforeOpening.in + data.beforeOpening.out > 0 && data.state !== "before" && (
+              <p style={{fontSize: 12, color: "var(--grey)", margin: "8px 0 0"}}>The caisse started on {data.startDate}. Cash before that day (in {fmtTnd(data.beforeOpening.in)}, out {fmtTnd(data.beforeOpening.out)} TND) is listed but is not part of the balance, because the opening count already includes it.</p>
+            )}
+            {!data.balanceCheck && <p role="alert" style={{fontSize: 12, color: "var(--err)", margin: "8px 0 0"}}>The lines do not add up to the closing balance. Please tell Claude.</p>}
+            <button className="btn-small" style={{marginTop: 10}} onClick={printIt}>Print this month</button>
+          </div>
+
+          {data.unclassifiedExpenses > 0 && (
+            <div style={{background: "#FFFBEB", border: "1px solid #F6E3A1", borderRadius: 8, padding: "8px 12px", fontSize: 12, color: "#92400E", marginBottom: 12}}>
+              {data.unclassifiedExpenses} expense{data.unclassifiedExpenses !== 1 ? "s have" : " has"} no payment method, so {data.unclassifiedExpenses !== 1 ? "they are" : "it is"} not in the cash book or the bank. Remove and re-enter {data.unclassifiedExpenses !== 1 ? "them" : "it"} with “Cash” or the real method.
+            </div>
+          )}
+
+          <div className="card">
+            <div className="component-label">Cash in</div>
+            <Line label={"Client payments (" + data.in.payments.count + ")"} value={fmtTnd(data.in.payments.total) + " TND"} />
+            {data.in.other.map(o => <Line key={o.category} label={o.category + " (" + o.count + ")"} value={fmtTnd(o.amount) + " TND"} />)}
+            {data.in.total === 0 && <p style={{fontSize: 13, color: "var(--grey)"}}>No cash came in this month.</p>}
+          </div>
+
+          <div className="card">
+            <div className="component-label">Cash out</div>
+            {data.out.expenses.byCategory.map(o => <Line key={o.category} label={o.category + " (" + o.count + ") · TVA " + fmtTnd(o.tva)} value={fmtTnd(o.amount) + " TND"} />)}
+            {data.out.other.map(o => <Line key={"o" + o.category} label={o.category + " (" + o.count + ")"} value={fmtTnd(o.amount) + " TND"} />)}
+            {data.out.expenses.count > 0 && <Line label="TVA on cash expenses (deductible)" value={fmtTnd(data.out.expenses.tva) + " TND"} small />}
+            {data.out.total === 0 && <p style={{fontSize: 13, color: "var(--grey)"}}>No cash went out this month.</p>}
+          </div>
+
+          {data.counts.length > 0 && (
+            <div className="card">
+              <div className="component-label">Cash counts</div>
+              {data.counts.map((c, i) => <Line key={i} label={c.date + " · expected " + fmtTnd(c.expected) + ", counted " + fmtTnd(c.counted) + (c.note ? " · " + c.note : "")} value={c.difference === 0 ? "exact" : (c.difference > 0 ? "+" : "") + fmtTnd(c.difference) + " TND"} />)}
+            </div>
+          )}
+
+          <div className="card">
+            <div className="component-label">All movements</div>
+            {data.movements.length === 0 && <p style={{fontSize: 13, color: "var(--grey)"}}>Nothing this month.</p>}
+            {data.movements.map(m => (
+              <div key={m.id} style={{display: "flex", justifyContent: "space-between", gap: 10, padding: "7px 0", borderTop: "1px solid var(--grey-light)"}}>
+                <div style={{minWidth: 0}}>
+                  <div style={{fontSize: 13, fontWeight: 600}}>{m.description || m.category}</div>
+                  <div style={{fontSize: 11, color: "var(--grey)"}}>{m.date} · {m.category}{!m.counted ? " · before the opening count" : ""}</div>
+                </div>
+                <div style={{textAlign: "right", whiteSpace: "nowrap"}}>
+                  <div style={{fontSize: 13, fontWeight: 600, color: m.dir === "in" ? "var(--ok)" : "var(--magenta-dark)"}}>{m.dir === "in" ? "+" : "−"}{fmtTnd(m.amount)}</div>
+                  {m.balance !== null && <div style={{fontSize: 11, color: "var(--grey)"}}>= {fmtTnd(m.balance)}</div>}
+                </div>
+              </div>
+            ))}
+          </div>
+        </React.Fragment>
+      )}
+    </div>
+  );
+}
+
+// The Attijari bank account (one account for the business). Owner only.
+function BankView({ pin }) {
+  const todayStr = new Date().toISOString().split("T")[0];
+  const now = new Date();
+  const [data, setData] = useState(null);
+  const [err, setErr] = useState("");
+  const [msg, setMsg] = useState("");
+  const [panel, setPanel] = useState("");   // "in" | "out" | "check" | "start"
+  const [busy, setBusy] = useState(false);
+  const [fDate, setFDate] = useState(todayStr);
+  const [fAmount, setFAmount] = useState("");
+  const [fCat, setFCat] = useState("Other");
+  const [fDesc, setFDesc] = useState("");
+  const [ym, setYm] = useState({ y: now.getFullYear(), m: now.getMonth() + 1 });
+  const [month, setMonth] = useState(null);
+
+  const load = () => {
+    setErr("");
+    apiCall({ action: "getBank", pin }).then(res => { if (res.success) setData(res); else setErr(res.error || "Couldn't load the bank."); }).catch(() => setErr("Couldn't reach the server. Please try again."));
+  };
+  useEffect(() => { load(); }, []);
+  useEffect(() => {
+    if (!data || !data.started) { setMonth(null); return; }
+    setMonth(null);
+    apiCall({ action: "getBankMonth", pin, year: ym.y, month: ym.m }).then(res => { if (res.success) setMonth(res); }).catch(() => {});
+  }, [ym.y, ym.m, data && data.balance, data && data.started]);
+
+  const open = (p) => { setPanel(p); setMsg(""); setFAmount(""); setFDesc(""); setFDate(todayStr); setFCat(p === "out" ? "Bank fees" : "Other"); };
+  const done = (text) => { setBusy(false); setPanel(""); setMsg(text); load(); };
+  const fail = (e) => { setBusy(false); setMsg(typeof e === "string" ? e : "Couldn't reach the server. Check the list before pressing again."); };
+  const start = () => { setBusy(true); setMsg(""); apiCall({ action: "setBankOpening", pin, date: fDate, amount: fAmount }).then(res => res.success ? done("The bank is set to " + fAmount + " TND on " + fDate + ".") : fail(res.error || "Could not save.")).catch(() => fail()); };
+  const addLine = (type) => { setBusy(true); setMsg(""); apiCall({ action: "addBankEntry", pin, type, date: fDate, amount: fAmount, category: fCat, description: fDesc }).then(res => res.success ? done("Saved.") : fail(res.error || "Could not save.")).catch(() => fail()); };
+  const check = (adjust) => {
+    setBusy(true); setMsg("");
+    apiCall({ action: "checkBank", pin, statement: fAmount, note: fDesc, adjust: adjust ? "1" : "" }).then(res => {
+      if (!res.success) { fail(res.error || "Could not save."); return; }
+      const d = res.difference;
+      done(d === 0 ? "The statement says " + fmtTnd(res.statement) + " TND: exactly what the dashboard expected." : "The statement says " + fmtTnd(res.statement) + " TND; the dashboard expected " + fmtTnd(res.expected) + " TND (" + (d > 0 ? "+" : "") + fmtTnd(d) + ")." + (res.adjusted ? " The bank now matches your statement." : ""));
+    }).catch(() => fail());
+  };
+  const remove = (id) => {
+    if (!window.confirm("Remove this bank line?")) return;
+    apiCall({ action: "deleteBankEntry", pin, entryId: id }).then(res => { if (res.success) load(); else setMsg(res.error || "Could not remove."); }).catch(() => setMsg("Couldn't reach the server."));
+  };
+  const printMonth = () => {
+    if (!month || !month.started) return;
+    const f = fmtTnd, e = escapeHtml;
+    let body = "<h1>Bank (Attijari) — " + e(month.label) + "</h1><div class='section'>";
+    if (month.state !== "before") body += '<div class="row"><span class="label">Opening balance</span><span>' + f(month.openingBalance) + " TND</span></div>";
+    body += '<div class="row"><span class="label">Client payments by bank / card</span><span>+ ' + f(month.in.payments) + " TND</span></div>";
+    body += '<div class="row"><span class="label">Cash deposited</span><span>+ ' + f(month.in.deposits) + " TND</span></div>";
+    body += '<div class="row"><span class="label">Other money in</span><span>+ ' + f(month.in.other) + " TND</span></div>";
+    body += '<div class="row"><span class="label">Expenses paid from the bank</span><span>− ' + f(month.out.expenses) + " TND</span></div>";
+    body += '<div class="row"><span class="label">Cash withdrawn</span><span>− ' + f(month.out.withdrawals) + " TND</span></div>";
+    body += '<div class="row"><span class="label">Other money out (fees...)</span><span>− ' + f(month.out.other) + " TND</span></div>";
+    if (month.state !== "before") body += '<div class="row"><span class="label"><b>Closing balance</b></span><span><b>' + f(month.closingBalance) + " TND</b></span></div>";
+    body += "</div><h2>Movements</h2><table><thead><tr><th>Date</th><th>Description</th><th>In</th><th>Out</th></tr></thead><tbody>";
+    month.entries.forEach(x => { body += "<tr><td>" + e(x.date) + "</td><td>" + e(x.description || x.category) + (x.city ? " (" + e(x.city) + ")" : "") + "</td><td>" + (x.income > 0 ? f(x.income) : "") + "</td><td>" + (x.expense > 0 ? f(x.expense) : "") + "</td></tr>"; });
+    body += "</tbody></table>";
+    printDocument("Bank — " + month.label, body);
+  };
+
+  const amountOk = fAmount !== "" && isFinite(Number(fAmount));
+  const field = { marginTop: 6, width: "100%" };
+  const srcLabel = { payment: "client payment", expense: "expense", transfer: "caisse transfer", manual: "", opening: "", adjustment: "" };
+
+  return (
+    <div>
+      <h2 className="hub-view-title">Bank · Attijari</h2>
+      <p className="page-sub">One account for the business. Payments by transfer or card and expenses paid by bank come in by themselves, and so does cash you deposit or withdraw in a caisse (use the category “Bank deposit” or “Bank withdrawal” there). Add anything else (fees, interest) yourself.</p>
+      {err && <LoadError message={err} onRetry={load} />}
+      {!data && !err && <div className="loading">Loading the bank...</div>}
+      {msg && <div role="status" style={{background: "var(--ok-bg)", color: "var(--ok)", borderRadius: 8, padding: "8px 12px", marginBottom: 12, fontSize: 13}}>{msg}</div>}
+
+      {data && !data.started && (
+        <div className="card">
+          <div className="component-label">Start the bank</div>
+          <p style={{fontSize: 13, color: "var(--grey)", margin: "4px 0 8px"}}>Enter the balance on your Attijari statement today. From that day on, every payment by bank and every bank expense is added automatically.</p>
+          <div className="payment-form-row">
+            <input className="form-input" type="date" max={todayStr} value={fDate} onChange={e => setFDate(e.target.value)} />
+            <input className="form-input" type="number" step="0.001" placeholder="Balance (TND)" value={fAmount} onChange={e => setFAmount(e.target.value)} />
+          </div>
+          <button className="btn-confirm" style={{marginTop: 10}} disabled={busy || !amountOk} onClick={start}>{busy ? "Saving..." : "Start the bank"}</button>
+        </div>
+      )}
+
+      {data && data.started && (
+        <React.Fragment>
+          <div className="card" style={{textAlign: "center"}}>
+            <div style={{fontSize: 12, color: "var(--grey)"}}>What should be in the bank account</div>
+            <div style={{fontSize: 36, fontWeight: 700, color: "var(--magenta-dark)", margin: "4px 0"}}>{fmtTnd(data.balance)} TND</div>
+            <div style={{fontSize: 12, color: "var(--grey)"}}>
+              Started {data.startDate} with {fmtTnd(data.opening)} TND · in {fmtTnd(data.totals.in)} · out {fmtTnd(data.totals.out)}
+              {data.lastCheck && <span> · last statement check {data.lastCheck.date}: {data.lastCheck.difference === 0 ? "exact" : (data.lastCheck.difference > 0 ? "+" : "") + fmtTnd(data.lastCheck.difference) + " TND"}</span>}
+            </div>
+            <div style={{display: "flex", gap: 8, justifyContent: "center", flexWrap: "wrap", marginTop: 12}}>
+              <button className="btn-small" onClick={() => open("in")}>+ Money in</button>
+              <button className="btn-small" onClick={() => open("out")}>− Money out</button>
+              <button className="btn-small" onClick={() => open("check")}>Check against my statement</button>
+              <button className="btn-small" style={{background: "var(--grey-light)", color: "var(--grey)"}} onClick={() => { open("start"); setFAmount(String(data.opening)); setFDate(data.startDate); }}>Change starting balance</button>
+            </div>
+          </div>
+
+          {panel && (
+            <div className="card">
+              {(panel === "in" || panel === "out") && (
+                <React.Fragment>
+                  <div className="component-label">{panel === "in" ? "Money in" : "Money out"} · bank</div>
+                  <p style={{fontSize: 12, color: "var(--grey)", margin: "2px 0 6px"}}>For example interest or a bank fee. Cash deposits and withdrawals are entered in the caisse, not here.</p>
+                  <div className="payment-form-row">
+                    <input className="form-input" type="date" max={todayStr} value={fDate} onChange={e => setFDate(e.target.value)} />
+                    <input className="form-input" type="number" min="0" step="0.001" placeholder="Amount (TND)" value={fAmount} onChange={e => setFAmount(e.target.value)} />
+                  </div>
+                  <select className="form-select" style={field} value={fCat} onChange={e => setFCat(e.target.value)}>{data.categories.map(c => <option key={c} value={c}>{c}</option>)}</select>
+                  <input className="form-input" style={field} placeholder="Note (optional)" value={fDesc} onChange={e => setFDesc(e.target.value)} />
+                  <button className="btn-confirm" style={{marginTop: 10}} disabled={busy || !(Number(fAmount) > 0)} onClick={() => addLine(panel)}>{busy ? "Saving..." : "Save"}</button>
+                </React.Fragment>
+              )}
+              {panel === "check" && (
+                <React.Fragment>
+                  <div className="component-label">Check against my statement</div>
+                  <p style={{fontSize: 12, color: "var(--grey)", margin: "2px 0 6px"}}>Enter the balance your Attijari app or statement shows now. You'll see the difference from {fmtTnd(data.balance)} TND.</p>
+                  <input className="form-input" type="number" step="0.001" style={field} placeholder="Balance on the statement (TND)" value={fAmount} onChange={e => setFAmount(e.target.value)} />
+                  <input className="form-input" style={field} placeholder="Note (optional)" value={fDesc} onChange={e => setFDesc(e.target.value)} />
+                  <div style={{display: "flex", gap: 8, flexWrap: "wrap", marginTop: 10}}>
+                    <button className="btn-confirm" disabled={busy || !amountOk} onClick={() => check(false)}>{busy ? "Saving..." : "Save the check"}</button>
+                    <button className="btn-small" disabled={busy || !amountOk} onClick={() => check(true)}>Save and make the bank match</button>
+                  </div>
+                </React.Fragment>
+              )}
+              {panel === "start" && (
+                <React.Fragment>
+                  <div className="component-label">Starting balance</div>
+                  <p style={{fontSize: 12, color: "var(--grey)", margin: "2px 0 6px"}}>Changing the date or amount changes the balance. Money from before the date is not counted.</p>
+                  <div className="payment-form-row">
+                    <input className="form-input" type="date" max={todayStr} value={fDate} onChange={e => setFDate(e.target.value)} />
+                    <input className="form-input" type="number" step="0.001" placeholder="Balance (TND)" value={fAmount} onChange={e => setFAmount(e.target.value)} />
+                  </div>
+                  <button className="btn-confirm" style={{marginTop: 10}} disabled={busy || !amountOk} onClick={start}>{busy ? "Saving..." : "Save"}</button>
+                </React.Fragment>
+              )}
+              <button className="btn-secondary" style={{marginTop: 8}} onClick={() => setPanel("")}>Cancel</button>
+            </div>
+          )}
+
+          <div className="card">
+            <div className="component-label">Month summary</div>
+            <MonthNav ym={ym} onChange={setYm} />
+            {!month && <div className="loading">Loading...</div>}
+            {month && month.started && (
+              <React.Fragment>
+                {month.state === "before" ? <p style={{fontSize: 13, color: "var(--grey)"}}>The bank starts on {month.startDate}, after this month, so there is no balance yet.</p> : <Line label="Opening balance" value={fmtTnd(month.openingBalance) + " TND"} />}
+                <Line label="Client payments by bank / card" value={"+ " + fmtTnd(month.in.payments) + " TND"} />
+                <Line label="Cash deposited" value={"+ " + fmtTnd(month.in.deposits) + " TND"} />
+                {month.in.other > 0 && <Line label="Other money in" value={"+ " + fmtTnd(month.in.other) + " TND"} />}
+                <Line label="Expenses paid from the bank" value={"− " + fmtTnd(month.out.expenses) + " TND"} />
+                <Line label="Cash withdrawn" value={"− " + fmtTnd(month.out.withdrawals) + " TND"} />
+                {month.out.other > 0 && <Line label="Other money out (fees...)" value={"− " + fmtTnd(month.out.other) + " TND"} />}
+                {month.state !== "before" && <Line label="Closing balance" value={fmtTnd(month.closingBalance) + " TND"} bold />}
+                <button className="btn-small" style={{marginTop: 10}} onClick={printMonth}>Print this month</button>
+              </React.Fragment>
+            )}
+          </div>
+
+          <div className="card">
+            <div className="component-label">Movements</div>
+            {[...data.entries].reverse().map(e => (
+              <div key={e.id} style={{display: "flex", justifyContent: "space-between", gap: 10, padding: "8px 0", borderTop: "1px solid var(--grey-light)"}}>
+                <div style={{minWidth: 0}}>
+                  <div style={{fontSize: 13, fontWeight: 600}}>{e.description || e.category}</div>
+                  <div style={{fontSize: 11, color: "var(--grey)"}}>{e.date} · {e.category}{srcLabel[e.source] ? " · " + srcLabel[e.source] + " (automatic)" : ""}{e.city ? " · " + e.city : ""}</div>
+                </div>
+                <div style={{textAlign: "right", whiteSpace: "nowrap"}}>
+                  <div style={{fontSize: 13, fontWeight: 600, color: e.income > 0 ? "var(--ok)" : "var(--magenta-dark)"}}>{e.income > 0 ? "+" + fmtTnd(e.income) : "−" + fmtTnd(e.expense)}</div>
+                  <div style={{fontSize: 11, color: "var(--grey)"}}>= {fmtTnd(e.balance)}</div>
+                  {(e.source === "manual" || e.source === "adjustment") && <span style={{fontSize: 11, color: "var(--grey)", textDecoration: "underline", cursor: "pointer"}} onClick={() => remove(e.id)}>remove</span>}
+                </div>
+              </div>
+            ))}
+          </div>
+        </React.Fragment>
+      )}
+    </div>
+  );
+}
+
 function CaisseView({ pin, staff }) {
   const isOwner = staff.role === "owner";
   const cities = (isOwner || staff.location === "All") ? ["Sousse", "Tunis"] : [staff.location === "Tunis" ? "Tunis" : "Sousse"];
@@ -6222,6 +6577,19 @@ function AccountingView({ pin }) {
       body += "</tbody></table>";
     }
 
+    if (report.cash) {
+      const f = fmtTnd, c = report.cash;
+      body += "<h2>Cash &amp; bank</h2><div class='section'>";
+      body += '<div class="row"><span class="label">Received from clients (' + escapeHtml(c.received.count) + ')</span><span>' + f(c.received.total) + " TND (cash " + f(c.received.cash) + ", bank/card " + f(c.received.bank) + ")</span></div>";
+      body += '<div class="row"><span class="label">Expenses paid in cash</span><span>' + f(c.expenses.cash.ttc) + " TND (TVA " + f(c.expenses.cash.tva) + ")</span></div>";
+      body += '<div class="row"><span class="label">Expenses paid by bank</span><span>' + f(c.expenses.bank.ttc) + " TND (TVA " + f(c.expenses.bank.tva) + ")</span></div>";
+      if (c.expenses.unclassified.count > 0) body += '<div class="row"><span class="label">Expenses with no payment method</span><span>' + f(c.expenses.unclassified.ttc) + " TND</span></div>";
+      c.caisse.forEach(x => {
+        body += '<div class="row"><span class="label">' + escapeHtml(x.city) + " caisse</span><span>" + (x.state === "before" ? "not started (in " + f(x.cashIn) + ", out " + f(x.cashOut) + ")" : f(x.openingBalance) + " + " + f(x.cashIn) + " − " + f(x.cashOut) + " = " + f(x.closingBalance) + " TND") + "</span></div>";
+      });
+      if (c.bank && c.bank.state && c.bank.state !== "notstarted") body += '<div class="row"><span class="label">Bank (Attijari)</span><span>' + (c.bank.state === "before" ? "not started" : f(c.bank.openingBalance) + " + " + f(c.bank.in.total) + " − " + f(c.bank.out.total) + " = " + f(c.bank.closingBalance) + " TND") + "</span></div>";
+      body += "</div>";
+    }
     body += "<h2>TVA position (estimate)</h2><div class='section'>";
     body += '<div class="row"><span class="label">TVA collectée</span><span>' + escapeHtml(report.tva.collected) + " TND</span></div>";
     body += '<div class="row"><span class="label">TVA déductible</span><span>' + escapeHtml(report.tva.deductible) + " TND</span></div>";
@@ -6319,6 +6687,47 @@ function AccountingView({ pin }) {
               </div>
             ))}
           </div>
+
+          {report.cash && (
+            <div className="card">
+              <div className="component-label">Cash &amp; bank in this period</div>
+              <div className="ledger-row"><span>Received from clients ({report.cash.received.count} payments)</span><span>{fmtTnd(report.cash.received.total)} TND</span></div>
+              <div className="ledger-row" style={{fontSize: 12, color: "var(--grey)"}}><span>…in cash</span><span>{fmtTnd(report.cash.received.cash)} TND</span></div>
+              <div className="ledger-row" style={{fontSize: 12, color: "var(--grey)"}}><span>…by bank / card</span><span>{fmtTnd(report.cash.received.bank)} TND</span></div>
+              <div className="ledger-row" style={{fontSize: 12, color: "var(--grey)"}}><span>Income reported above (CA TTC)</span><span>{fmtTnd(report.income.caTtc)} TND</span></div>
+              <p style={{fontSize: 11, color: "var(--grey)", margin: "4px 0 8px"}}>These can differ: money received counts when it arrives, income when the service happened.</p>
+              <div className="ledger-row"><span>Expenses paid in cash ({report.cash.expenses.cash.count})</span><span>{fmtTnd(report.cash.expenses.cash.ttc)} TND · TVA {fmtTnd(report.cash.expenses.cash.tva)}</span></div>
+              <div className="ledger-row"><span>Expenses paid by bank ({report.cash.expenses.bank.count})</span><span>{fmtTnd(report.cash.expenses.bank.ttc)} TND · TVA {fmtTnd(report.cash.expenses.bank.tva)}</span></div>
+              {report.cash.expenses.unclassified.count > 0 && <div className="ledger-row" style={{color: "#92400E"}}><span>Expenses with no payment method ({report.cash.expenses.unclassified.count})</span><span>{fmtTnd(report.cash.expenses.unclassified.ttc)} TND</span></div>}
+              {report.cash.caisse.map(c => (
+                <div key={c.city} style={{marginTop: 10, paddingTop: 8, borderTop: "1px solid var(--grey-light)"}}>
+                  <div style={{fontSize: 13, fontWeight: 600}}>{c.city} caisse</div>
+                  {c.state === "before"
+                    ? <div className="ledger-row" style={{fontSize: 12, color: "var(--grey)"}}><span>Not started in this period: cash in {fmtTnd(c.cashIn)}, out {fmtTnd(c.cashOut)}</span><span>no balance</span></div>
+                    : <React.Fragment>
+                        <div className="ledger-row"><span>Opening</span><span>{fmtTnd(c.openingBalance)} TND</span></div>
+                        <div className="ledger-row"><span>Cash in</span><span>+ {fmtTnd(c.cashIn)} TND</span></div>
+                        <div className="ledger-row"><span>Cash out{c.deposits > 0 ? " (of which deposited " + fmtTnd(c.deposits) + ")" : ""}</span><span>− {fmtTnd(c.cashOut)} TND</span></div>
+                        <div className="ledger-row" style={{fontWeight: 600}}><span>Closing</span><span>{fmtTnd(c.closingBalance)} TND</span></div>
+                      </React.Fragment>}
+                </div>
+              ))}
+              {report.cash.bank && report.cash.bank.state !== "notstarted" && (
+                <div style={{marginTop: 10, paddingTop: 8, borderTop: "1px solid var(--grey-light)"}}>
+                  <div style={{fontSize: 13, fontWeight: 600}}>Bank (Attijari)</div>
+                  {report.cash.bank.state === "before"
+                    ? <div className="ledger-row" style={{fontSize: 12, color: "var(--grey)"}}><span>Not started in this period</span><span>no balance</span></div>
+                    : <React.Fragment>
+                        <div className="ledger-row"><span>Opening</span><span>{fmtTnd(report.cash.bank.openingBalance)} TND</span></div>
+                        <div className="ledger-row"><span>Money in</span><span>+ {fmtTnd(report.cash.bank.in.total)} TND</span></div>
+                        <div className="ledger-row"><span>Money out</span><span>− {fmtTnd(report.cash.bank.out.total)} TND</span></div>
+                        <div className="ledger-row" style={{fontWeight: 600}}><span>Closing</span><span>{fmtTnd(report.cash.bank.closingBalance)} TND</span></div>
+                      </React.Fragment>}
+                </div>
+              )}
+              {report.cash.bank && report.cash.bank.state === "notstarted" && <p style={{fontSize: 12, color: "var(--grey)", marginTop: 10}}>The bank isn't started yet: open Caisse → Bank to start it.</p>}
+            </div>
+          )}
 
           <div className="card">
             <div className="component-label">TVA position (estimate)</div>
