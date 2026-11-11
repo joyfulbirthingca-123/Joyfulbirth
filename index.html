@@ -1296,7 +1296,7 @@ function App(){
 
       {aTab==="availability"&&<div>
         <p style={S.h2}>Opening hours &amp; team</p>
-        <p style={S.sb}>This is what customers can book, read live from the booking system. Individual days off, holidays and time away are set in the staff dashboard (Days Off, Staff Away) or as all-day entries on each city's Google Calendar.</p>
+        <p style={S.sb}>This is what customers can book, read live from the booking system. Individual days off, holidays and time away are set in the staff dashboard (Team page: Closed days, My time off) or as all-day entries on each city's Google Calendar.</p>
         {CITY_NAMES.map(cn=>{var cc=cityCfg(cn);return<div key={cn} style={S.cd}>
           <p style={S.h3}>{cc.label||cn}</p>
           <p style={{margin:"0 0 6px",fontSize:13,color:C.t2}}>Team: {(cc.staff||[]).join(", ")||"-"}</p>
@@ -1310,7 +1310,7 @@ function App(){
           <p style={Object.assign({},S.h2,{margin:0})}>Services</p>
           <button style={S.bp} onClick={()=>setSvcFrm({id:Date.now().toString(),name:"New Service",dur:60,price:0,hasDelivery:false,customAvail:null})}><IcoPlus size={13}/> Add</button>
         </div>
-        <p style={Object.assign({},S.sb,{marginBottom:"1rem"})}>Built-in services (s1-s6) show bilingual names automatically. Prices and durations edited here only change this device; customers see the prices in the booking page itself. Days and times per service are set in the staff dashboard (Service hours).</p>
+        <p style={Object.assign({},S.sb,{marginBottom:"1rem"})}>Built-in services (s1-s6) show bilingual names automatically. Prices and durations edited here only change this device; customers see the prices in the booking page itself. Days and times per service are set in the staff dashboard (Team → Service hours).</p>
         {svcs.map(svc=>{var ea=svc.customAvail||avail;var actD=[0,1,2,3,4,5,6].filter(i=>ea[i]&&ea[i].enabled);return<div key={svc.id} style={S.cd}>
           <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",gap:"0.5rem"}}>
             <div style={{flex:1}}>
@@ -1341,7 +1341,7 @@ function App(){
               </div>
               <p style={{margin:0,fontSize:13,color:svcFrm.hasDelivery?C.txt:C.t2}}>Pick-up / Delivery option</p>
             </div>
-            <p style={Object.assign({},S.sb,{fontSize:12,borderTop:"0.5px solid "+C.bdr,paddingTop:"0.85rem"})}>Which days and times this service can be booked is set in the staff dashboard under <strong>Service hours</strong> (separately for Sousse and Tunis).</p>
+            <p style={Object.assign({},S.sb,{fontSize:12,borderTop:"0.5px solid "+C.bdr,paddingTop:"0.85rem"})}>Which days and times this service can be booked is set in the staff dashboard under <strong>Team → Service hours</strong> (separately for Sousse and Tunis).</p>
             <div style={{display:"flex",gap:8,marginTop:"0.75rem"}}>
               <button style={S.bp} onClick={()=>{var ex=svcs.filter(s=>s.id===svcFrm.id)[0];saveSvcs(ex?svcs.map(s=>s.id===svcFrm.id?svcFrm:s):svcs.concat([svcFrm]));setSvcFrm(null);showToast("Saved!");}}><IcoSave size={13}/> Save</button>
               <button style={S.bt} onClick={()=>setSvcFrm(null)}><IcoX size={13}/> Cancel</button>

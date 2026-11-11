@@ -4911,8 +4911,8 @@ function MyTimeOffView({ pin, name }) {
       {data && (
         <div className="card">
           <div className="component-label">Your coming time off</div>
-          {data.entries.length === 0 && <p style={{fontSize: 13, color: "var(--grey)"}}>Nothing booked off.</p>}
-          {data.entries.map(e => (
+          {(data.entries || []).length === 0 && <p style={{fontSize: 13, color: "var(--grey)"}}>Nothing booked off.</p>}
+          {(data.entries || []).map(e => (
             <div key={e.id} style={{display: "flex", justifyContent: "space-between", gap: 10, padding: "8px 0", borderTop: "1px solid var(--grey-light)"}}>
               <div>
                 <div style={{fontSize: 13, fontWeight: 600}}>{range(e.from, e.to)}</div>
@@ -4972,8 +4972,8 @@ function DaysOffView({ pin }) {
 
   return (
     <div>
-      <h2 className="hub-view-title">Days off</h2>
-      <p className="page-sub">Close days or hours on the public booking page for both cities or one city (a holiday, a training day). Nobody can book them, even with the page already open. Each team member sets their own time off under My time off.</p>
+      <h2 className="hub-view-title">Closed days</h2>
+      <p className="page-sub">Close days or hours on the public booking page for both cities or one city (a holiday, a training day). Nobody can book them, even with the page already open. Each team member sets their own time off on the My time off tab.</p>
       {err && <LoadError message={err} onRetry={load} />}
       {!data && !err && <div className="loading">Loading...</div>}
       {msg && <div role="status" style={{background: "var(--ok-bg)", color: "var(--ok)", borderRadius: 8, padding: "8px 12px", marginBottom: 12, fontSize: 13}}>{msg}</div>}
@@ -5911,19 +5911,6 @@ function Dashboard({ staff, pin, onLogout }) {
         <div className={"nav-item" + (view === "team" ? " active" : "")} onClick={() => setView("team")}>
           Team
         </div>
-        <div className={"nav-item" + (view === "mytimeoff" ? " active" : "")} onClick={() => setView("mytimeoff")}>
-          My time off
-        </div>
-        {staff.role === "owner" && (
-          <div className={"nav-item" + (view === "daysoff" ? " active" : "")} onClick={() => setView("daysoff")}>
-            Days off
-          </div>
-        )}
-        {staff.role === "owner" && (
-          <div className={"nav-item" + (view === "servicehours" ? " active" : "")} onClick={() => setView("servicehours")}>
-            Service hours
-          </div>
-        )}
 
         <div className="nav-section">Clients</div>
         <div className={"nav-item" + (view === "clients" ? " active" : "")} onClick={() => setView("clients")}>
@@ -5955,12 +5942,9 @@ function Dashboard({ staff, pin, onLogout }) {
         {data && view === "today" && <TodayView pin={pin} data={data} onRefresh={loadData} onReview={() => { setClientsOpen(staff.role === "owner" ? "link" : "import"); setView("clients"); }} refreshKey={ficheTick} />}
         {data && view === "calendar" && <CalendarView pin={pin} currentStaff={staff} />}
         {data && view === "groups" && <GroupClassesView pin={pin} currentStaff={staff} />}
-        {data && view === "daysoff" && staff.role === "owner" && <DaysOffView pin={pin} />}
-        {data && view === "servicehours" && staff.role === "owner" && <ServiceHoursView pin={pin} />}
         {data && view === "messages" && <MessagesView pin={pin} />}
         {data && view === "oncall" && <OnCallView pin={pin} isOwner={staff.role === "owner"} />}
-        {data && view === "team" && <TeamView pin={pin} />}
-        {data && view === "mytimeoff" && <MyTimeOffView pin={pin} name={staff.name} />}
+        {data && view === "team" && <TeamHub pin={pin} staff={staff} />}
         {data && view === "clients" && <ClientsView pin={pin} currentStaff={staff} autoOpen={clientsOpen} onAutoOpened={() => setClientsOpen(null)} unlinked={data.unlinked} />}
         {data && view === "invoice" && <InvoicesHub pin={pin} />}
         {data && view === "caisse" && <CaisseHub pin={pin} staff={staff} />}
@@ -5995,6 +5979,22 @@ function MonthNav({ ym, onChange, label }) {
 }
 function Line({ label, value, bold, small, minus }) {
   return <div className="ledger-row" style={{fontWeight: bold ? 600 : 400, fontSize: small ? 12 : undefined, color: small ? "var(--grey)" : undefined}}><span>{label}</span><span>{minus ? "− " : ""}{value}</span></div>;
+}
+
+// Team, everyone's own time off, closed days and service hours on ONE page (tabs), instead of four menu items.
+function TeamHub({ pin, staff }) {
+  const isOwner = staff.role === "owner";
+  const [tab, setTab] = useState("week");
+  const tabs = [["week", "This week"], ["off", "My time off"]].concat(isOwner ? [["closed", "Closed days"], ["hours", "Service hours"]] : []);
+  return (
+    <div>
+      <TabBar tabs={tabs} value={tab} onChange={setTab} />
+      {tab === "week" && <TeamView pin={pin} />}
+      {tab === "off" && <MyTimeOffView pin={pin} name={staff.name} />}
+      {tab === "closed" && isOwner && <DaysOffView pin={pin} />}
+      {tab === "hours" && isOwner && <ServiceHoursView pin={pin} />}
+    </div>
+  );
 }
 
 function CaisseHub({ pin, staff }) {
