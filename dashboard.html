@@ -1850,6 +1850,30 @@ function TeamView({ pin }) {
   );
 }
 
+// One pump rental that was recorded without saying which pump: choose it here and it comes off that city's stock.
+function PumpFixRow({ row, pin, onDone }) {
+  const [model, setModel] = useState("");
+  const [period, setPeriod] = useState(row.period || "");
+  const [busy, setBusy] = useState(false);
+  const save = (force) => {
+    if (!model) return;
+    setBusy(true);
+    apiCall({ action: "setPumpOnBooking", pin, bookingId: row.bookingId, pumpModel: model, rentalPeriod: period, force: force === true ? "1" : "" }).then(res => {
+      setBusy(false);
+      if (!res.success && res.code === "noPump") { if (window.confirm(res.error)) save(true); return; }
+      onDone(res.success ? row.clientName + ": the " + res.model + " now comes off " + res.city + "'s stock." : (res.error || "Could not save."));
+    }).catch(() => { setBusy(false); onDone("Couldn't reach the server."); });
+  };
+  return (
+    <div style={{display: "flex", gap: 6, alignItems: "center", flexWrap: "wrap", padding: "4px 0"}}>
+      <span style={{fontSize: 12, minWidth: 190}}>{row.clientName} · {row.date} · {row.city}</span>
+      <select className="form-select" style={{maxWidth: 130}} value={model} onChange={e => setModel(e.target.value)}><option value="">Which pump?</option><option value="Spectra S1">Spectra S1</option><option value="Spectra S2">Spectra S2</option></select>
+      <select className="form-select" style={{maxWidth: 120}} value={period} onChange={e => setPeriod(e.target.value)}><option value="">How long?</option><option value="1 Week">1 week</option><option value="1 Month">1 month</option></select>
+      <button className="btn-small" disabled={busy || !model} onClick={() => save()}>{busy ? "..." : "Save"}</button>
+    </div>
+  );
+}
+
 // One list of what quietly needs a person, and the pumps that are out (with a Returned button).
 function NeedsAttentionCard({ pin, onGo, onReview }) {
   const [items, setItems] = useState([]);
@@ -1871,7 +1895,12 @@ function NeedsAttentionCard({ pin, onGo, onReview }) {
     <div className="card" style={{marginBottom: 14}}>
       <div className="component-label">Needs attention</div>
       {msg && <p role="status" style={{fontSize: 12, color: "var(--ok)", margin: "4px 0"}}>{msg}</p>}
-      {items.map(it => (
+      {items.map(it => it.kind === "pumpNoModel" ? (
+        <div key={it.kind} style={{padding: "8px 0", borderTop: "1px solid var(--grey-light)"}}>
+          <div style={{fontSize: 13, fontWeight: 600}}>{it.count} · {it.label}</div>
+          {(it.rows || []).map(r => <PumpFixRow key={r.bookingId} row={r} pin={pin} onDone={(m) => { setMsg(m); load(); }} />)}
+        </div>
+      ) : (
         <div key={it.kind} style={{padding: "8px 0", borderTop: "1px solid var(--grey-light)"}}>
           <div style={{display: "flex", justifyContent: "space-between", gap: 8, alignItems: "center"}}>
             <div style={{fontSize: 13, fontWeight: 600}}>{it.count} · {it.label}</div>
