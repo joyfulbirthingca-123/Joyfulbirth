@@ -3119,8 +3119,10 @@ function ClientProfileModal({ client, packages, staffList, currentStaff, pin, on
       if (res.success) {
         setEditing(false);
         onUpdated();
+      } else {
+        window.alert(res.error || "The changes could not be saved. Please try again.");
       }
-    });
+    }).catch(() => { setSavingEdit(false); window.alert("Couldn't reach the server, so the changes may not be saved. Check the profile before trying again."); });
   };
 
   // The invoice covers the package PLUS any add-on services. Nothing records what was invoiced
