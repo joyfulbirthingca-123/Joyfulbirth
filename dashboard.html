@@ -2475,6 +2475,11 @@ function PaymentLedger({ client, pin, onUpdated, packages }) {
   const [ledger, setLedger] = useState(null);
   const [amount, setAmount] = useState("");
   const [method, setMethod] = useState("");
+  const [payCity, setPayCity] = useState(client.location === "Sousse" || client.location === "Tunis" ? client.location : lastPayCity());   // blank = must choose
+  const [payMsg, setPayMsg] = useState("");
+  const [lateCash, setLateCash] = useState(null);   // a cash payment dated before the caisse started: ask if the cash came in today
+  const [editCity, setEditCity] = useState("");
+  const [editCash, setEditCash] = useState("");
   const [svcDesc, setSvcDesc] = useState("");
   const [svcAmount, setSvcAmount] = useState("");
   const [svcTime, setSvcTime] = useState("");
@@ -2495,13 +2500,30 @@ function PaymentLedger({ client, pin, onUpdated, packages }) {
 
   const refresh = () => { load(); onUpdated(); };
 
+  const cashLike = (m) => !String(m || "").trim() || /cash|esp[eè]ce|liquide|naqd/i.test(m);
   const addPaymentEntry = () => {
-    if (!amount) return;
-    setBusy(true);
+    if (!amount || !payCity) return;
+    setBusy(true); setPayMsg("");
     // Send the date explicitly — otherwise the backend stamps today, which
     // throws off monthly revenue when you record a payment after the fact.
-    apiCall({ action: "addPayment", pin, clientId: client.id, clientName: client.name, amount, method, date: payDate || todayStr() }).then(() => {
+    rememberPayCity(payCity);
+    apiCall({ action: "addPayment", pin, clientId: client.id, clientName: client.name, amount, method, date: payDate || todayStr(), city: payCity }).then((res) => {
+      if (res && res.notInCaisse) {
+        setLateCash({ id: res.paymentId, city: res.notInCaisse.city, start: res.notInCaisse.startDate, amount });
+        setPayMsg("");
+      } else {
+        setLateCash(null);
+        setPayMsg(cashLike(method) ? "Recorded: " + amount + " TND cash went into the " + payCity + " caisse." : "Recorded for " + payCity + ". It is not cash, so it goes to the bank, not a caisse.");
+      }
       setAmount(""); setMethod(""); setPayDate(todayStr()); setBusy(false); refresh();
+    });
+  };
+  const answerLateCash = (cameToday) => {
+    const lc = lateCash; if (!lc) return;
+    if (!cameToday) { setLateCash(null); setPayMsg("Recorded. It was already in the drawer before the " + lc.city + " caisse started, so it is not added again."); return; }
+    setBusy(true);
+    apiCall({ action: "updatePayment", pin, paymentId: lc.id, cashDate: todayStr() }).then(() => {
+      setBusy(false); setLateCash(null); setPayMsg("Done: " + lc.amount + " TND went into the " + lc.city + " caisse today."); refresh();
     });
   };
 
@@ -2529,13 +2551,13 @@ function PaymentLedger({ client, pin, onUpdated, packages }) {
     }).catch(() => { setBusy(false); setSvcMsg("Couldn't reach the server."); });
   };
 
-  const startEditPayment = (p) => { setEditId(p.id); setEditA(String(p.amount)); setEditB(p.method || ""); setEditDate(p.date || ""); };
+  const startEditPayment = (p) => { setEditId(p.id); setEditA(String(p.amount)); setEditB(p.method || ""); setEditDate(p.date || ""); setEditCity(p.city || ""); setEditCash(p.cashDate || ""); };
   const startEditCharge = (c) => { setEditId(c.id); setEditA(String(c.amount)); setEditB(c.description || ""); setEditDate(c.date || ""); };
   const cancelEdit = () => { setEditId(null); setEditA(""); setEditB(""); };
 
   const saveEditPayment = (id) => {
     setBusy(true);
-    apiCall({ action: "updatePayment", pin, paymentId: id, amount: editA, method: editB, date: editDate }).then(() => {
+    apiCall({ action: "updatePayment", pin, paymentId: id, amount: editA, method: editB, date: editDate, city: editCity, cashDate: editCash }).then(() => {
       setBusy(false); cancelEdit(); refresh();
     });
   };
@@ -2604,12 +2626,16 @@ function PaymentLedger({ client, pin, onUpdated, packages }) {
                 <input className="form-input" type="number" value={editA} onChange={e => setEditA(e.target.value)} placeholder="Amount" style={{maxWidth: 110}} />
                 <input className="form-input" value={editB} onChange={e => setEditB(e.target.value)} placeholder="Method" />
                 <input className="form-input" type="date" value={editDate} onChange={e => setEditDate(e.target.value)} />
+                <select className="form-select" value={editCity} onChange={e => setEditCity(e.target.value)} style={{maxWidth: 130}} title="Which city's caisse">
+                  <option value="">City not set</option><option value="Sousse">Sousse</option><option value="Tunis">Tunis</option>
+                </select>
+                <input className="form-input" type="date" value={editCash} onChange={e => setEditCash(e.target.value)} title="Day the cash came in, if it is not the date above (the caisse and the bank use it)" style={{maxWidth: 150}} />
                 <button className="btn-small" onClick={() => saveEditPayment(p.id)} disabled={busy}>Save</button>
                 <button className="btn-remove-row" onClick={cancelEdit}>×</button>
               </div>
             ) : (
               <div className="ledger-row" key={p.id}>
-                <span>{p.date}{p.method ? " · " + p.method : ""}</span>
+                <span>{p.date}{p.method ? " · " + p.method : ""} · <span style={{fontSize: 11, padding: "1px 7px", borderRadius: 10, background: p.city ? (p.city === "Tunis" ? "#E0ECFF" : "var(--grey-light)") : "#FFFBEB", color: p.city ? (p.city === "Tunis" ? "#1E40AF" : "var(--grey)") : "#92400E"}}>{p.city || "city not set"}</span>{p.cashDate && p.cashDate !== p.date ? <span style={{fontSize: 11, color: "var(--grey)"}}> · cash in on {p.cashDate}</span> : null}</span>
                 <span style={{display: "flex", alignItems: "center", gap: 8}}>
                   {p.amount} TND
                   <span style={{fontSize: 11, color: "var(--magenta-dark)", cursor: "pointer", textDecoration: "underline"}} onClick={() => startEditPayment(p)}>edit</span>
@@ -2625,8 +2651,22 @@ function PaymentLedger({ client, pin, onUpdated, packages }) {
         <input className="form-input" type="number" placeholder="Payment amount" value={amount} onChange={e => setAmount(e.target.value)} />
         <input className="form-input" placeholder="Method (cash, transfer...)" value={method} onChange={e => setMethod(e.target.value)} />
         <input className="form-input" type="date" value={payDate} onChange={e => setPayDate(e.target.value)} title="Date payment was received" />
-        <button className="btn-small" onClick={addPaymentEntry} disabled={busy}>Add payment</button>
+        <select className="form-select" value={payCity} onChange={e => { setPayCity(e.target.value); rememberPayCity(e.target.value); }} title="Which city's caisse the cash goes into" style={{maxWidth: 150, borderColor: payCity ? undefined : "var(--magenta)"}}>
+          <option value="">Which caisse?</option><option value="Sousse">Sousse caisse</option><option value="Tunis">Tunis caisse</option>
+        </select>
+        <button className="btn-small" onClick={addPaymentEntry} disabled={busy || !amount || !payCity}>Add payment</button>
       </div>
+      {amount && !payCity && <p style={{fontSize: 11, color: "var(--magenta-dark)", margin: "4px 0 0"}}>Choose Sousse or Tunis, so the cash goes into the right caisse.</p>}
+      {payMsg && <p role="status" style={{fontSize: 12, color: "var(--ok)", margin: "6px 0 0"}}>{payMsg}</p>}
+      {lateCash && (
+        <div role="alert" style={{background: "#FFFBEB", border: "1px solid #F6E3A1", borderRadius: 8, padding: "10px 12px", margin: "8px 0 0", fontSize: 13, color: "#92400E"}}>
+          That payment is dated before the {lateCash.city} caisse started ({lateCash.start}), so it isn't in the caisse yet. <strong>Did you receive this {lateCash.amount} TND in cash today?</strong>
+          <div style={{display: "flex", gap: 8, marginTop: 8, flexWrap: "wrap"}}>
+            <button className="btn-small" disabled={busy} onClick={() => answerLateCash(true)}>Yes, add it to the caisse today</button>
+            <button className="btn-small" style={{background: "var(--grey-light)", color: "var(--grey)"}} disabled={busy} onClick={() => answerLateCash(false)}>No, it was already in the drawer</button>
+          </div>
+        </div>
+      )}
 
       <div className="payment-form-row" style={{marginTop: 6}}>
         <select
@@ -3646,7 +3686,7 @@ function LinkBookingsModal({ pin, onClose, onChanged }) {
 function RecordPaymentsModal({ clients, pin, onClose, onChanged }) {
   const open = (clients || []).filter(c => String(c.status || "").toLowerCase() !== "new" && Number(c.balance) > 0.0005)
     .sort((a, b) => String(a.name).localeCompare(String(b.name)));
-  const [rows, setRows] = useState(() => open.map(c => ({ id: c.id, name: c.name, pkg: c.packageName, owed: Number(c.balance), amount: String(Number(c.balance)), date: "", src: "", on: true })));
+  const [rows, setRows] = useState(() => open.map(c => ({ id: c.id, name: c.name, pkg: c.packageName, owed: Number(c.balance), amount: String(Number(c.balance)), date: "", src: "", on: true, city: c.location === "Sousse" || c.location === "Tunis" ? c.location : lastPayCity() })));
   const [allDate, setAllDate] = useState("");
   const [dateNote, setDateNote] = useState("Looking up each client's service date...");
   // Pre-fill each payment with the date of that client's service (the owner can still change it).
@@ -3665,15 +3705,15 @@ function RecordPaymentsModal({ clients, pin, onClose, onChanged }) {
   const patch = (id, p) => setRows(rs => rs.map(r => r.id === id ? { ...r, ...p } : r));
   const applyAll = () => { if (allDate) setRows(rs => rs.map(r => ({ ...r, date: allDate, src: "date you chose" }))); };
   const chosen = rows.filter(r => r.on);
-  const ready = chosen.filter(r => r.date && Number(r.amount) > 0 && r.date <= today);
+  const ready = chosen.filter(r => r.date && r.city && Number(r.amount) > 0 && r.date <= today);
   const readyTotal = ready.reduce((s, r) => s + (Number(r.amount) || 0), 0);
 
   const save = () => {
     if (ready.length === 0) return;
-    if (ready.length !== chosen.length && !window.confirm((chosen.length - ready.length) + " ticked row(s) have no date or amount and will be left out. Continue?")) return;
+    if (ready.length !== chosen.length && !window.confirm((chosen.length - ready.length) + " ticked row(s) have no date, amount or caisse and will be left out. Continue?")) return;
     setBusy(true);
     setMsg("");
-    apiCall({ action: "recordPaymentsBulk", pin, approvedList: JSON.stringify(ready.map(r => ({ clientId: r.id, amount: Number(r.amount), date: r.date }))) }).then(res => {
+    apiCall({ action: "recordPaymentsBulk", pin, approvedList: JSON.stringify(ready.map(r => ({ clientId: r.id, amount: Number(r.amount), date: r.date, city: r.city }))) }).then(res => {
       setBusy(false);
       if (res.success) { setDone(res); if (onChanged) onChanged(); }
       else setMsg(res.error || "Could not record the payments.");
@@ -3717,12 +3757,15 @@ function RecordPaymentsModal({ clients, pin, onClose, onChanged }) {
                       </div>
                       <input className="form-input" type="number" min="0" step="0.001" style={{width: 90}} value={r.amount} onChange={e => patch(r.id, { amount: e.target.value })} />
                       <input className="form-input" type="date" max={today} style={{width: 150}} value={r.date} onChange={e => patch(r.id, { date: e.target.value, src: "date you chose" })} />
+                      <select className="form-select" style={{width: 130, borderColor: r.city ? undefined : "var(--magenta)"}} value={r.city} onChange={e => patch(r.id, { city: e.target.value })} title="Which caisse the cash goes into">
+                        <option value="">Which caisse?</option><option value="Sousse">Sousse</option><option value="Tunis">Tunis</option>
+                      </select>
                     </div>
                   ))}
                 </div>
                 {msg && <p role="alert" style={{fontSize: 12, color: "var(--magenta-dark)", margin: "8px 0 0"}}>{msg}</p>}
                 <button className="btn-confirm" style={{marginTop: 12}} disabled={busy || ready.length === 0} onClick={save}>
-                  {busy ? "Recording..." : ready.length === 0 ? "Add a date to at least one row" : "Record " + ready.length + " payment" + (ready.length !== 1 ? "s" : "") + " (" + Math.round(readyTotal * 1000) / 1000 + " TND)"}
+                  {busy ? "Recording..." : ready.length === 0 ? "Choose a date and a caisse for at least one row" : "Record " + ready.length + " payment" + (ready.length !== 1 ? "s" : "") + " (" + Math.round(readyTotal * 1000) / 1000 + " TND)"}
                 </button>
               </React.Fragment>
             )}
@@ -5956,6 +5999,8 @@ function Dashboard({ staff, pin, onLogout }) {
 
 
 // The cash book: how much cash should be in the drawer, per city.
+const lastPayCity = () => { try { const c = localStorage.getItem("jbs_pay_city"); return c === "Sousse" || c === "Tunis" ? c : ""; } catch (e) { return ""; } };
+const rememberPayCity = (c) => { try { if (c) localStorage.setItem("jbs_pay_city", c); } catch (e) { /* private window */ } };
 const fmtTnd = (n) => (Math.round((Number(n) || 0) * 1000) / 1000).toLocaleString("en-US", { minimumFractionDigits: 0, maximumFractionDigits: 3 });
 const MONTH_NAMES = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
 function shiftYm(ym, dir) { const d = new Date(ym.y, ym.m - 1 + dir, 1); return { y: d.getFullYear(), m: d.getMonth() + 1 }; }
@@ -6126,7 +6171,7 @@ function CashBookView({ pin, staff }) {
               <div key={m.id} style={{display: "flex", justifyContent: "space-between", gap: 10, padding: "7px 0", borderTop: "1px solid var(--grey-light)"}}>
                 <div style={{minWidth: 0}}>
                   <div style={{fontSize: 13, fontWeight: 600}}>{m.description || m.category}</div>
-                  <div style={{fontSize: 11, color: "var(--grey)"}}>{m.date} · {m.category}{!m.counted ? " · before the opening count" : ""}</div>
+                  <div style={{fontSize: 11, color: "var(--grey)"}}>{m.date} · {m.category}{!m.counted ? " · before the opening count" : ""}{m.cityAssumed ? " · city not chosen (counted in Sousse)" : ""}</div>
                 </div>
                 <div style={{textAlign: "right", whiteSpace: "nowrap"}}>
                   <div style={{fontSize: 13, fontWeight: 600, color: m.dir === "in" ? "var(--ok)" : "var(--magenta-dark)"}}>{m.dir === "in" ? "+" : "−"}{fmtTnd(m.amount)}</div>
@@ -6378,6 +6423,9 @@ function CaisseView({ pin, staff }) {
       if (res.success) { setMsg("Moved to the " + otherCity + " caisse."); load(); } else setMsg(res.error || "Could not move.");
     }).catch(() => setMsg("Couldn't reach the server."));
   };
+  const setPayCityTo = (paymentId, to) => {
+    apiCall({ action: "updatePayment", pin, paymentId, city: to }).then(res => { if (res.success) { setMsg("Moved into the " + to + " caisse."); load(); } else setMsg(res.error || "Could not change it."); }).catch(() => setMsg("Couldn't reach the server."));
+  };
   const remove = (id) => {
     if (!window.confirm("Remove this line from the caisse?")) return;
     apiCall({ action: "deleteCaisseEntry", pin, entryId: id }).then(res => { if (res.success) load(); else setMsg(res.error || "Could not remove."); }).catch(() => setMsg("Couldn't reach the server."));
@@ -6390,7 +6438,7 @@ function CaisseView({ pin, staff }) {
   return (
     <div>
       <h2 className="hub-view-title">Caisse</h2>
-      <p className="page-sub">The cash that should be in the drawer. Cash payments from clients and cash expenses are added automatically; add anything else yourself.</p>
+      <p className="page-sub">The cash that should be in the {city} drawer. A cash payment goes into the caisse chosen when it was recorded (Sousse or Tunis); cash expenses are added automatically too. Add anything else yourself.</p>
 
       {cities.length > 1 && (
         <div style={{display: "flex", border: "1.5px solid var(--grey-light)", borderRadius: 8, overflow: "hidden", width: "fit-content", marginBottom: 14}}>
@@ -6481,6 +6529,22 @@ function CaisseView({ pin, staff }) {
             </div>
           )}
 
+          {(data.needsCity || []).length > 0 && (
+            <div className="card" style={{border: "1.5px solid #F6E3A1", background: "#FFFBEB"}}>
+              <div className="component-label" style={{color: "#92400E"}}>{data.needsCity.length} cash payment{data.needsCity.length !== 1 ? "s" : ""} not assigned to a caisse yet</div>
+              <p style={{fontSize: 12, color: "#92400E", margin: "2px 0 6px"}}>These clients are listed as “All”, so their cash is counted here in Sousse for now. Tap where it really went.</p>
+              {data.needsCity.map(n => (
+                <div key={n.paymentId} style={{display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8, padding: "6px 0", borderTop: "1px solid #F6E3A1"}}>
+                  <span style={{fontSize: 13}}>{n.date} · {n.clientName} · <strong>{fmt(n.amount)} TND</strong></span>
+                  <span style={{display: "flex", gap: 6}}>
+                    <button className="btn-small" onClick={() => setPayCityTo(n.paymentId, "Sousse")}>Sousse</button>
+                    <button className="btn-small" onClick={() => setPayCityTo(n.paymentId, "Tunis")}>Tunis</button>
+                  </span>
+                </div>
+              ))}
+            </div>
+          )}
+
           {data.unclassifiedExpenses > 0 && (
             <div style={{background: "#FFFBEB", border: "1px solid #F6E3A1", borderRadius: 8, padding: "8px 12px", fontSize: 12, color: "#92400E", marginBottom: 12}}>
               {data.unclassifiedExpenses} expense{data.unclassifiedExpenses !== 1 ? "s have" : " has"} no payment method, so {data.unclassifiedExpenses !== 1 ? "they are" : "it is"} not in the caisse. If paid in cash, remove and re-enter {data.unclassifiedExpenses !== 1 ? "them" : "it"} with “Cash”.
@@ -6494,7 +6558,7 @@ function CaisseView({ pin, staff }) {
                 <div style={{minWidth: 0}}>
                   <div style={{fontSize: 13, fontWeight: 600}}>{e.description || e.category}</div>
                   <div style={{fontSize: 11, color: "var(--grey)"}}>
-                    {e.date} · {e.category}{e.source === "payment" || e.source === "expense" ? " · automatic" : ""}
+                    {e.date} · {e.category}{e.source === "payment" || e.source === "expense" ? " · automatic" : ""}{e.cityAssumed ? " · city not chosen (counted here)" : ""}
                   </div>
                 </div>
                 <div style={{textAlign: "right", whiteSpace: "nowrap"}}>
