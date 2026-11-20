@@ -3167,6 +3167,7 @@ function ClientProfileModal({ client, packages, staffList, currentStaff, pin, on
     if (opts) {
       params.includePackage = opts.pkg ? "1" : "0";
       params.chargeIds = JSON.stringify(Object.keys(opts.ch).filter(id => opts.ch[id]));
+      params.paymentIds = JSON.stringify(Object.keys(opts.pay || {}).filter(id => opts.pay[id]));
     }
     apiCall(params).then(res => {
       setGenerating(false);
@@ -3176,7 +3177,8 @@ function ClientProfileModal({ client, packages, staffList, currentStaff, pin, on
         if (av) {
           setInvOpts({
             pkg: !!av.package.included,
-            ch: av.charges.reduce((m, c) => { m[c.id] = !!c.included; return m; }, {})
+            ch: av.charges.reduce((m, c) => { m[c.id] = !!c.included; return m; }, {}),
+            pay: (av.payments || []).reduce((m, p) => { m[p.id] = !!p.included; return m; }, {})
           });
         }
       } else {
@@ -3189,13 +3191,27 @@ function ClientProfileModal({ client, packages, staffList, currentStaff, pin, on
 
   const toggleInvLine = (kind, id) => {
     if (!invOpts) return;
-    const next = { pkg: invOpts.pkg, ch: { ...invOpts.ch } };
-    if (kind === "pkg") next.pkg = !next.pkg; else next.ch[id] = !next.ch[id];
-    if (!next.pkg && !Object.keys(next.ch).some(k => next.ch[k])) {
+    const next = { pkg: invOpts.pkg, ch: { ...invOpts.ch }, pay: { ...(invOpts.pay || {}) } };
+    if (kind === "pkg") next.pkg = !next.pkg; else if (kind === "pay") next.pay[id] = !next.pay[id]; else next.ch[id] = !next.ch[id];
+    if (!next.pkg && !Object.keys(next.ch).some(k => next.ch[k]) && !Object.keys(next.pay).some(k => next.pay[k])) {
       setLineMsg("Keep at least one line ticked — an invoice needs something on it.");
       return;
     }
     requestInvoice(next);
+  };
+
+  // One-click choices: the package (+ add-ons) as before, or what was actually paid (every payment received)
+  const invoicePackageOnly = () => {
+    if (!invOpts) return;
+    const ch = {}; Object.keys(invOpts.ch).forEach(k => { ch[k] = true; });
+    const pay = {}; Object.keys(invOpts.pay || {}).forEach(k => { pay[k] = false; });
+    requestInvoice({ pkg: true, ch, pay });
+  };
+  const invoicePayments = () => {
+    if (!invOpts) return;
+    const ch = {}; Object.keys(invOpts.ch).forEach(k => { ch[k] = false; });
+    const pay = {}; Object.keys(invOpts.pay || {}).forEach(k => { pay[k] = true; });
+    requestInvoice({ pkg: false, ch, pay });
   };
 
   const saveAndPrint = () => {
@@ -3519,9 +3535,15 @@ function ClientProfileModal({ client, packages, staffList, currentStaff, pin, on
                 ‹ Back to profile
               </span>
             </div>
-            {inv.available && inv.available.charges.length > 0 && invOpts && (
+            {inv.available && (inv.available.charges.length > 0 || (inv.available.payments || []).length > 0) && invOpts && (
               <div className="component-block" style={{marginBottom: 12, opacity: generating ? 0.6 : 1}}>
                 <div className="component-label">Lines on this invoice</div>
+                {(inv.available.payments || []).length > 0 && (
+                  <div style={{display: "flex", gap: 8, flexWrap: "wrap", margin: "4px 0 8px"}}>
+                    <button type="button" className="btn-small" disabled={generating} onClick={invoicePackageOnly}>The package{inv.available.charges.length > 0 ? " + add-ons" : ""}</button>
+                    <button type="button" className="btn-small" disabled={generating} onClick={invoicePayments}>Every payment received ({inv.available.payments.length})</button>
+                  </div>
+                )}
                 <label style={{display: "flex", alignItems: "center", gap: 8, cursor: "pointer", padding: "4px 0", fontSize: 13}}>
                   <input type="checkbox" checked={invOpts.pkg} disabled={generating} onChange={() => toggleInvLine("pkg")} />
                   <span style={{flex: 1}}>{inv.available.package.description} (package)</span>
@@ -3534,9 +3556,21 @@ function ClientProfileModal({ client, packages, staffList, currentStaff, pin, on
                     <span>{c.amount} TND</span>
                   </label>
                 ))}
+                {(inv.available.payments || []).length > 0 && (
+                  <React.Fragment>
+                    <div className="component-label" style={{marginTop: 10}}>Payments received</div>
+                    {inv.available.payments.map(p => (
+                      <label key={p.id} style={{display: "flex", alignItems: "center", gap: 8, cursor: "pointer", padding: "4px 0", fontSize: 13}}>
+                        <input type="checkbox" checked={!!(invOpts.pay || {})[p.id]} disabled={generating} onChange={() => toggleInvLine("pay", p.id)} />
+                        <span style={{flex: 1}}>{p.date}{p.method ? " · " + p.method : ""}</span>
+                        <span>{p.amount} TND</span>
+                      </label>
+                    ))}
+                  </React.Fragment>
+                )}
                 {lineMsg && <p role="alert" style={{fontSize: 12, color: "var(--magenta-dark)", margin: "6px 0 0"}}>{lineMsg}</p>}
                 <p style={{fontSize: 11, color: "var(--grey)", margin: "6px 0 0"}}>
-                  Untick anything you've already invoiced before, so it isn't billed twice.
+                  Untick anything you've already invoiced before, so it isn't billed twice. The package and the payments are the same money: tick one or the other, not both.
                 </p>
               </div>
             )}
